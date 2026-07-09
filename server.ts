@@ -42,11 +42,47 @@ async function startServer() {
   // IN-MEMORY FALLBACK DATABASE REPOSITORY (CLEARED FOR PRODUCTION)
   // -------------------------------------------------------------
   let users: User[] = [
-    { id: "u-admin-1", role: "admin", name: "Suresh Gupta", email: "admin@legaltalk.in", mobile: "9900001122" }
+    { id: "u-admin-1", role: "admin", name: "Suresh Gupta", email: "admin@legaltalk.in", mobile: "9900001122" },
+    { id: "u-client-demo", role: "client", name: "Demo Client", email: "client@demo.in", mobile: "9876543210", freeCallMinutesRemaining: 2, freeChatsRemaining: 10 },
+    { id: "u-lawyer-demo", role: "lawyer", name: "Adv. Rajesh Kumar", email: "advocate@demo.in", mobile: "9988776655" }
   ];
-  let lawyerProfiles: LawyerProfile[] = [];
+  let lawyerProfiles: LawyerProfile[] = [
+    {
+      id: "lp-demo",
+      userId: "u-lawyer-demo",
+      fullName: "Adv. Rajesh Kumar",
+      email: "advocate@demo.in",
+      mobile: "9988776655",
+      barCouncilNumber: "D/992/2012",
+      stateBarCouncil: "Delhi Bar Council",
+      aadhaar: "123456789012",
+      pan: "ABCDE1234F",
+      bio: "Senior criminal defense and property disputes advocate practicing at the Supreme Court of India.",
+      experienceYears: 12,
+      languages: ["English", "Hindi"],
+      categories: ["Criminal Law", "Property Law"],
+      chatPricePerMinute: 20,
+      voicePricePerMinute: 30,
+      videoPricePerMinute: 40,
+      isOnline: true,
+      rating: 4.8,
+      reviewCount: 15,
+      practiceState: "Delhi",
+      practiceDistrict: "New Delhi",
+      llbGraduationYear: 2012,
+      llbUniversity: "Faculty of Law, Delhi University",
+      barAssociationName: "Supreme Court Bar Association",
+      placeOfPractice: "Supreme Court of India",
+      enrollmentCertificateUrl: "https://example.com/certs/enrollment-cert.pdf",
+      copUrl: "https://example.com/certs/cop.pdf",
+      llbCertificateUrl: "https://example.com/certs/llb-degree.pdf",
+      subscriptionExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+    }
+  ];
   let wallets: Wallet[] = [
-    { userId: "u-admin-1", balance: 50000 }
+    { userId: "u-admin-1", balance: 50000 },
+    { userId: "u-client-demo", balance: 500 },
+    { userId: "u-lawyer-demo", balance: 0 }
   ];
   let walletTransactions: WalletTransaction[] = [];
   let consultations: Consultation[] = [];
@@ -386,7 +422,157 @@ async function startServer() {
     }
   }
 
+  async function seedDemoAccounts() {
+    if (supabase) {
+      try {
+        // Seed client
+        const { data: clientExists, error: checkClientErr } = await supabase
+          .from('users')
+          .select('*')
+          .eq('email', 'client@demo.in')
+          .maybeSingle();
+
+        let clientUserId = '';
+        if (checkClientErr) {
+          console.error("[Supabase Initializer] Error checking client@demo.in presence:", checkClientErr);
+        } else if (!clientExists) {
+          console.log("[Supabase Initializer] Seeding client@demo.in...");
+          const clientData = {
+            role: 'client',
+            name: 'Demo Client',
+            email: 'client@demo.in',
+            mobile: '9876543210',
+            city: 'Delhi',
+            language: 'English, Hindi',
+            is_blocked: false
+          };
+
+          let seededClient = null;
+          try {
+            const { data, error } = await supabase
+              .from('users')
+              .insert([{
+                ...clientData,
+                free_call_minutes_remaining: 2,
+                free_chats_remaining: 10
+              }])
+              .select()
+              .single();
+            if (error) throw error;
+            seededClient = data;
+          } catch (e: any) {
+            console.warn("[Supabase Initializer] Failed inserting client with free limit columns. Retrying without them...", e.message);
+            const { data, error } = await supabase
+              .from('users')
+              .insert([clientData])
+              .select()
+              .single();
+            if (error) {
+              console.error("[Supabase Initializer] Failed to seed client@demo.in user:", error);
+            } else {
+              seededClient = data;
+            }
+          }
+
+          if (seededClient) {
+            clientUserId = seededClient.id;
+            console.log("[Supabase Initializer] client@demo.in user seeded successfully with ID:", clientUserId);
+            // Update client wallet balance to 500
+            const { error: clientWalletErr } = await supabase
+              .from('wallets')
+              .update({ balance: 500.00 })
+              .eq('user_id', clientUserId);
+            if (clientWalletErr) {
+              console.error("[Supabase Initializer] Failed to set client wallet balance:", clientWalletErr);
+            }
+          }
+        } else {
+          clientUserId = clientExists.id;
+          const { data: wallet } = await supabase.from('wallets').select('*').eq('user_id', clientUserId).maybeSingle();
+          if (wallet && Number(wallet.balance) === 0) {
+            await supabase.from('wallets').update({ balance: 500.00 }).eq('user_id', clientUserId);
+          }
+        }
+
+        // Seed advocate
+        const { data: advocateExists, error: checkAdvocateErr } = await supabase
+          .from('users')
+          .select('*')
+          .eq('email', 'advocate@demo.in')
+          .maybeSingle();
+
+        let advocateUserId = '';
+        if (checkAdvocateErr) {
+          console.error("[Supabase Initializer] Error checking advocate@demo.in presence:", checkAdvocateErr);
+        } else if (!advocateExists) {
+          console.log("[Supabase Initializer] Seeding advocate@demo.in...");
+          const { data: seededAdvocate, error: seedAdvocateErr } = await supabase
+            .from('users')
+            .insert([{
+              role: 'lawyer',
+              name: 'Adv. Rajesh Kumar',
+              email: 'advocate@demo.in',
+              mobile: '9988776655',
+              city: 'Delhi',
+              language: 'English, Hindi',
+              is_blocked: false
+            }])
+            .select()
+            .single();
+
+          if (seedAdvocateErr) {
+            console.error("[Supabase Initializer] Failed to seed advocate@demo.in user:", seedAdvocateErr);
+          } else {
+            advocateUserId = seededAdvocate.id;
+            console.log("[Supabase Initializer] advocate@demo.in user seeded successfully with ID:", advocateUserId);
+            
+            // Create lawyer profile
+            const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+            const { error: seedProfileErr } = await supabase
+              .from('lawyers')
+              .insert([{
+                user_id: advocateUserId,
+                bar_council_number: 'D/992/2012',
+                state_bar_council: 'Delhi Bar Council',
+                aadhaar: '123456789012',
+                pan: 'ABCDE1234F',
+                bio: 'Senior criminal defense and property disputes advocate practicing at the Supreme Court of India.',
+                experience_years: 12,
+                languages: ['English', 'Hindi'],
+                categories: ['Criminal Law', 'Property Law'],
+                chat_price_per_minute: 20,
+                voice_price_per_minute: 30,
+                video_price_per_minute: 40,
+                verification_status: 'approved',
+                is_online: true,
+                rating: 4.8,
+                practice_state: 'Delhi',
+                practice_district: 'New Delhi',
+                llb_graduation_year: 2012,
+                llb_university: 'Faculty of Law, Delhi University',
+                bar_association_name: 'Supreme Court Bar Association',
+                place_of_practice: 'Supreme Court of India',
+                enrollment_certificate_url: 'https://example.com/certs/enrollment-cert.pdf',
+                cop_url: 'https://example.com/certs/cop.pdf',
+                llb_certificate_url: 'https://example.com/certs/llb-degree.pdf',
+                subscription_expires_at: oneYearFromNow
+              }]);
+
+            if (seedProfileErr) {
+              console.error("[Supabase Initializer] Failed to seed advocate profile:", seedProfileErr);
+            } else {
+              console.log("[Supabase Initializer] advocate profile seeded successfully.");
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[Supabase Initializer] Failed to seed demo accounts in Supabase:", err);
+      }
+    }
+  }
+
   seedDefaultAdmin();
+  seedDemoAccounts();
   autoApproveExistingLawyers();
 
   // -------------------------------------------------------------

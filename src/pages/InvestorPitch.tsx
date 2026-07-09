@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Scale, Users, Award, ShieldCheck, DollarSign, Wallet, ArrowLeft, ArrowRight, Play, Pause,
   RotateCcw, Sparkles, TrendingUp, ShieldAlert, CheckCircle2, Video, MessageSquare, PhoneCall, 
-  RefreshCw, LogIn, FileText, Lock, BarChart3, HelpCircle, Activity, Globe, Check
+  RefreshCw, LogIn, FileText, Lock, BarChart3, HelpCircle, Activity, Globe, Check, Send, User, Laptop
 } from 'lucide-react';
 
 const SLIDES = [
@@ -125,9 +125,15 @@ const SLIDES = [
     accent: 'from-amber-600 to-yellow-600'
   },
   {
+    id: 'ai-bot-sandbox',
+    title: 'Interactive AI Legal Bot',
+    subtitle: 'Ask our Legal AI Assistant questions directly inside the presentation',
+    accent: 'from-amber-600 to-yellow-600'
+  },
+  {
     id: 'interactive-demo',
-    title: 'Interactive Prototype Sandbox',
-    subtitle: 'Test our metered billing engine, KYC flow, and transaction logs',
+    title: 'Live 2-Device Sandbox Demo',
+    subtitle: 'Connect client to lawyer live, or run the local metered call simulation',
     accent: 'from-amber-600 to-yellow-600'
   },
   {
@@ -158,7 +164,7 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
   const [cacValue, setCacValue] = useState(150); // CAC in INR
   
   // Interactive KYC State
-  const [kycLawyerName, setKycLawyerName] = useState('Adv. Ananya Sen');
+  const [kycLawyerName, setKycLawyerName] = useState('Adv. Rajesh Kumar');
   const [kycStatus, setKycStatus] = useState<'pending' | 'verified' | 'rejected'>('pending');
   const [kycLog, setKycLog] = useState<string[]>(['Lawyer submitted LLB degree & COP certificate.']);
 
@@ -169,13 +175,35 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
   const [callDuration, setCallDuration] = useState(0);
   const [totalCharged, setTotalCharged] = useState(0);
 
+  // Interactive AI Assistant State
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiMessages, setAiMessages] = useState<any[]>([
+    {
+      role: 'assistant',
+      text: "### Welcome to LegalTalk India AI Desk.\n\nI am your interactive legal assistant trained on Indian Penal Code, Civil Procedure, BNS, Marriage, and Tax bylaws. Type any question below or select a sample query to test my intelligence."
+    }
+  ]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const sampleAiPrompts = [
+    "What is the waiting period for Mutual Consent Divorce under Hindu Marriage Act?",
+    "Explain Section 302 of the IPC and its bail criteria.",
+    "What are the mandatory KYC documents required for advocates to practice online?"
+  ];
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [aiMessages, aiLoading]);
+
   // Auto-play effect
   useEffect(() => {
     let interval: any = null;
     if (isPlaying) {
       interval = setInterval(() => {
         handleNext();
-      }, 8500);
+      }, 9500);
     }
     return () => clearInterval(interval);
   }, [isPlaying, currentSlideIndex]);
@@ -255,6 +283,39 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
   const ltvValue = (10 * 120) * 0.20 + 350; // Mock calculation based on user transactions
   const ltvToCacRatio = (ltvValue / cacValue).toFixed(1);
 
+  // AI Assistant submit handler
+  const handleAiSubmit = async (e?: React.FormEvent, customText?: string) => {
+    if (e) e.preventDefault();
+    const query = customText || aiPrompt;
+    if (!query.trim() || aiLoading) return;
+
+    setAiMessages(prev => [...prev, { role: 'user', text: query }]);
+    setAiPrompt('');
+    setAiLoading(true);
+
+    try {
+      const res = await fetch("/api/ai-assistant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: query })
+      });
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const rawText = data.text || '';
+      const escTag = '[ACTION_REQUIRED: ESCALATE_TO_LAWYER]';
+      const cleanedText = rawText.replace(escTag, '').trim();
+
+      setAiMessages(prev => [...prev, { role: 'assistant', text: cleanedText }]);
+    } catch (err: any) {
+      setAiMessages(prev => [...prev, { role: 'assistant', text: `### Connection Error\n\nApologies, the legal model could not be connected. Details: ${err.message}` }]);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const handleKycApprove = () => {
     setKycStatus('verified');
     setKycLog(prev => [...prev, 'Admin approved Aadhaar verification.', 'Virtual Chambers activated on Public Marketplace.']);
@@ -316,9 +377,9 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-1.5 bg-amber-50 border border-amber-250/30 rounded-full px-3 py-1 text-xs font-semibold text-amber-800">
-            <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-            <span>Interactive Deck V2.0</span>
+          <div className="hidden sm:flex items-center gap-1.5 bg-amber-55 border border-amber-250/30 rounded-full px-3 py-1 text-xs font-semibold text-amber-800">
+            <span className="w-2 h-2 rounded-full bg-amber-500 " />
+            <span>Investor Sandbox Active</span>
           </div>
           <button
             onClick={() => setIsPlaying(!isPlaying)}
@@ -334,9 +395,9 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-8 flex flex-col justify-center relative z-10">
         
         {/* SLIDE CARD */}
-        <div className="bg-white/95 border border-amber-100/40 rounded-3xl p-6 sm:p-10 shadow-xl shadow-amber-950/5 relative min-h-[510px] flex flex-col justify-between backdrop-blur-xl">
+        <div className="bg-white/95 border border-amber-100/40 rounded-3xl p-6 sm:p-10 shadow-xl shadow-amber-950/5 relative min-h-[530px] flex flex-col justify-between backdrop-blur-xl">
           
-          {/* Progress Indicator */}
+          {/* Progress Bar */}
           <div className="absolute top-0 left-0 right-0 h-1 bg-slate-100 rounded-t-3xl overflow-hidden">
             <motion.div 
               className="h-full bg-gradient-to-r from-amber-500 to-yellow-600"
@@ -384,7 +445,7 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
                     <div className="pt-6 flex justify-center gap-4">
                       <button 
                         onClick={handleNext}
-                        className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs uppercase tracking-wider px-6 py-3.5 rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 cursor-pointer border border-amber-400"
+                        className="bg-amber-500 hover:bg-amber-600 text-slate-955 font-bold text-xs uppercase tracking-wider px-6 py-3.5 rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center gap-2 cursor-pointer border border-amber-400"
                       >
                         <span>Start Pitch Deck</span>
                         <ArrowRight className="w-4 h-4" />
@@ -540,9 +601,9 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
                     <div className="md:col-span-7 grid grid-cols-2 gap-4">
                       {SLIDES[currentSlideIndex].metrics?.map((m, idx) => (
                         <div key={idx} className="bg-white border border-slate-205 p-5 rounded-2xl space-y-2 shadow-sm">
-                          <span className="block text-[10px] text-slate-400 uppercase font-black tracking-wider font-mono">{m.metric}</span>
+                          <span className="block text-[10px] text-slate-445 uppercase font-black tracking-wider font-mono">{m.metric}</span>
                           <span className="block text-2xl font-display font-black text-amber-600">{m.value}</span>
-                          <span className="block text-[10px] text-slate-500 leading-normal font-medium">{m.desc}</span>
+                          <span className="block text-[10px] text-slate-505 leading-normal font-medium">{m.desc}</span>
                         </div>
                       ))}
                     </div>
@@ -653,7 +714,7 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
                                 <strong className="block font-mono text-slate-800 text-sm">₹{Math.round(estimatedAnnualRunRate).toLocaleString()}</strong>
                               </div>
                               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                                <span className="block text-[9px] text-slate-450 uppercase font-mono">LTV : CAC Ratio</span>
+                                <span className="block text-[9px] text-slate-455 uppercase font-mono">LTV : CAC Ratio</span>
                                 <strong className="block font-mono text-emerald-650 text-sm">{ltvToCacRatio}x</strong>
                               </div>
                               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
@@ -692,77 +753,218 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
                   </div>
                 )}
 
-                {/* 9. INTERACTIVE DEMO SLIDE */}
+                {/* 9. INTERACTIVE AI LEGAL BOT SLIDE */}
+                {SLIDES[currentSlideIndex].id === 'ai-bot-sandbox' && (
+                  <div className="space-y-4 text-left">
+                    <div>
+                      <span className="text-[10px] font-bold tracking-widest text-amber-600 uppercase font-mono">Live Responsive Assistant</span>
+                      <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 mt-1">
+                        {SLIDES[currentSlideIndex].subtitle}
+                      </h2>
+                    </div>
+
+                    <div className="grid md:grid-cols-12 gap-6 items-stretch pt-1">
+                      
+                      {/* Left: Quick Prompts selection */}
+                      <div className="md:col-span-4 flex flex-col justify-between bg-white border border-slate-200 p-5 rounded-2xl shadow-sm">
+                        <div className="space-y-4">
+                          <h3 className="font-display font-black text-[10px] tracking-wider uppercase text-slate-500 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-655" />
+                            <span>Sample Queries</span>
+                          </h3>
+                          <div className="space-y-2.5">
+                            {sampleAiPrompts.map((p, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => handleAiSubmit(undefined, p)}
+                                disabled={aiLoading}
+                                className="w-full text-left bg-slate-50 hover:bg-amber-50/50 hover:border-amber-400/40 border border-slate-200 p-3 rounded-xl text-xs font-semibold text-slate-700 leading-snug transition-all cursor-pointer"
+                              >
+                                {p}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-indigo-900 bg-indigo-50 border border-indigo-150 p-3 rounded-xl mt-4 leading-normal font-medium">
+                          <strong>Note:</strong> Fully responsive, connected directly to Google GenAI capabilities with localized Indian judicial guidelines.
+                        </div>
+                      </div>
+
+                      {/* Right: AI Chatbot Box */}
+                      <div className="md:col-span-8 bg-white border border-slate-200 rounded-2xl flex flex-col justify-between h-[320px] shadow-sm relative overflow-hidden">
+                        
+                        {/* Chat Messages */}
+                        <div className="flex-1 p-4 overflow-y-auto space-y-4 text-xs">
+                          {aiMessages.map((msg, i) => (
+                            <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[10px] ${msg.role === 'user' ? 'bg-slate-250 text-slate-800 font-bold' : 'bg-amber-600 text-white'}`}>
+                                {msg.role === 'user' ? 'U' : <Scale className="w-3 h-3" />}
+                              </div>
+                              <div className={`max-w-md rounded-xl p-3 leading-relaxed ${msg.role === 'user' ? 'bg-amber-100 text-slate-900' : 'bg-slate-50 border border-slate-150 text-slate-800'}`}>
+                                {msg.text.split('\n\n').map((para: string, pIdx: number) => {
+                                  if (para.startsWith('###')) {
+                                    return <h4 key={pIdx} className="font-bold text-slate-900 mt-2 mb-1">{para.replace('###', '').trim()}</h4>;
+                                  }
+                                  if (para.startsWith('*') || para.startsWith('-')) {
+                                    return (
+                                      <ul key={pIdx} className="list-disc pl-4 my-1 space-y-0.5">
+                                        {para.split('\n').map((item, itemIdx) => (
+                                          <li key={itemIdx}>{item.replace(/^[\s*-]+/, '').trim()}</li>
+                                        ))}
+                                      </ul>
+                                    );
+                                  }
+                                  return <p key={pIdx} className="my-1">{para}</p>;
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                          {aiLoading && (
+                            <div className="flex gap-2 items-center text-slate-400 italic">
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              <span>Thinking...</span>
+                            </div>
+                          )}
+                          <div ref={chatEndRef} />
+                        </div>
+
+                        {/* Input Box */}
+                        <form onSubmit={handleAiSubmit} className="border-t border-slate-150 p-2 flex gap-2 bg-slate-50/50">
+                          <input
+                            type="text"
+                            value={aiPrompt}
+                            onChange={(e) => setAiPrompt(e.target.value)}
+                            placeholder="Ask any legal doubt here..."
+                            className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                            disabled={aiLoading}
+                          />
+                          <button
+                            type="submit"
+                            disabled={aiLoading}
+                            className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold p-2.5 rounded-xl transition-colors cursor-pointer border border-amber-400"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                          </button>
+                        </form>
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+
+                {/* 10. INTERACTIVE DEMO / DEVICE LOGINS SLIDE */}
                 {SLIDES[currentSlideIndex].id === 'interactive-demo' && (
                   <div className="space-y-6 text-left">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                       <div>
-                        <span className="text-[10px] font-bold tracking-widest text-amber-600 uppercase font-mono">Live Interactive Demo</span>
+                        <span className="text-[10px] font-bold tracking-widest text-amber-600 uppercase font-mono">Live Multi-Device Demo</span>
                         <h2 className="font-display font-black text-2xl sm:text-3xl text-slate-900 mt-1">
-                          Test our Metered Billing Engine & KYC Approval flow
+                          Test client-lawyer chat live on 2 devices
                         </h2>
                       </div>
                     </div>
 
-                    {/* TWO PLAYGROUND MODULES */}
-                    <div className="grid md:grid-cols-2 gap-6 pt-2">
+                    <div className="grid lg:grid-cols-12 gap-6 pt-1">
                       
-                      {/* Module B: Real-Time Metered Billing Simulator */}
-                      <div className="bg-white border border-slate-205 p-6 rounded-2xl space-y-4 flex flex-col justify-between shadow-sm">
+                      {/* Left: Device Login instructions & Credentials */}
+                      <div className="lg:col-span-6 bg-white border border-slate-200 p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <h3 className="font-display font-black text-xs uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                            <Laptop className="w-4 h-4 text-amber-600" />
+                            <span>Investor Demo Credentials</span>
+                          </h3>
+                          <p className="text-xs text-slate-550 leading-relaxed font-medium">
+                            To showcase real-time communication, open this app on **two separate devices** (or in private/incognito tabs) and log in:
+                          </p>
+
+                          <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                            <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl space-y-2">
+                              <span className="px-2 py-0.5 rounded text-[8px] font-bold bg-amber-100 text-amber-800 border border-amber-250 uppercase font-mono">Device 1: Client</span>
+                              <div className="font-mono text-[10px] text-slate-700 mt-1.5 space-y-1">
+                                <div>Email: <strong className="text-slate-900">client@demo.in</strong></div>
+                                <div>Wallet: <strong className="text-emerald-700">₹500</strong></div>
+                                <div>Pass: <span className="text-slate-400">any value</span></div>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl space-y-2">
+                              <span className="px-2 py-0.5 rounded text-[8px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-250 uppercase font-mono">Device 2: Lawyer</span>
+                              <div className="font-mono text-[10px] text-slate-700 mt-1.5 space-y-1">
+                                <div>Email: <strong className="text-slate-900">advocate@demo.in</strong></div>
+                                <div>Status: <strong className="text-emerald-600">Online</strong></div>
+                                <div>Pass: <span className="text-slate-400">any value</span></div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <ol className="space-y-1.5 text-[11px] text-slate-500 list-decimal pl-4 pt-1 font-medium">
+                            <li>Log Device 1 in as Client, Device 2 in as Lawyer.</li>
+                            <li>On Device 1, find <strong className="text-slate-800">Adv. Rajesh Kumar</strong> in the directory and click "Chat".</li>
+                            <li>Device 2 will receive a live ringer notification to join the chat session.</li>
+                          </ol>
+                        </div>
+
+                        <div className="bg-amber-50 border border-amber-200/50 p-3.5 rounded-xl text-[10px] text-amber-900 leading-normal font-semibold">
+                          No setup required! These sandbox logins are automatically pre-seeded in the database for instant, zero-friction investor validation.
+                        </div>
+                      </div>
+
+                      {/* Right: Real-Time Local Billing Simulator (Backup Option) */}
+                      <div className="lg:col-span-6 bg-white border border-slate-200 p-6 rounded-2xl space-y-4 flex flex-col justify-between shadow-sm">
                         <div className="space-y-4">
                           <h3 className="font-display font-bold text-xs uppercase tracking-wider text-slate-700 flex items-center gap-2">
                             <Video className="w-4 h-4 text-amber-600" />
-                            <span>Metered Consultation Billing</span>
+                            <span>Quick Metered Billing Simulator</span>
                           </h3>
 
                           {mockCallState === 'idle' && (
-                            <div className="text-center py-6 space-y-3">
-                              <div className="w-12 h-12 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
-                                <PhoneCall className="w-5 h-5" />
+                            <div className="text-center py-4 space-y-2">
+                              <div className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto text-slate-450">
+                                <PhoneCall className="w-4.5 h-4.5" />
                               </div>
-                              <p className="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed font-medium">
-                                Client has <strong>2 free minutes</strong> and a <strong>₹60 wallet</strong>. Call costs ₹10/min after free limits.
+                              <p className="text-[10px] text-slate-500 max-w-xs mx-auto leading-normal font-medium">
+                                Simulate client-lawyer connection directly on this screen. Charges ₹10/min after free limits.
                               </p>
                               <button 
                                 onClick={startMockCall}
-                                className="bg-amber-500 hover:bg-amber-600 text-slate-955 font-bold text-xs px-4 py-2.5 rounded-lg cursor-pointer transition-all border border-amber-400"
+                                className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs px-4 py-2 rounded-lg cursor-pointer transition-all border border-amber-400"
                               >
-                                Trigger Mock Call
+                                Trigger Simulation
                               </button>
                             </div>
                           )}
 
                           {mockCallState === 'calling' && (
-                            <div className="text-center py-8 space-y-2">
-                              <span className="block w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping mx-auto" />
-                              <strong className="block text-xs text-amber-605 font-mono uppercase tracking-widest mt-2">Connecting Peer...</strong>
+                            <div className="text-center py-6 space-y-2">
+                              <span className="block w-2 h-2 bg-amber-500 rounded-full animate-ping mx-auto" />
+                              <strong className="block text-[10px] text-amber-605 font-mono uppercase tracking-widest">Connecting Peer...</strong>
                             </div>
                           )}
 
                           {mockCallState === 'active' && (
-                            <div className="bg-slate-50 border border-amber-100 p-4 rounded-xl space-y-3">
-                              <div className="flex justify-between items-center text-[10px]">
-                                <span className="flex items-center gap-1 text-emerald-600 font-semibold uppercase tracking-wider">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                                  <span>Live Stream</span>
+                            <div className="bg-slate-50 border border-amber-100 p-3 rounded-xl space-y-2.5 text-xs">
+                              <div className="flex justify-between items-center text-[9px]">
+                                <span className="flex items-center gap-1 text-emerald-600 font-bold uppercase">
+                                  <span className="w-1 h-1 rounded-full bg-emerald-500 animate-ping" />
+                                  <span>Simulated call</span>
                                 </span>
-                                <span className="font-mono text-slate-500">Duration: {callDuration}s (Simulated Min: {Math.floor(callDuration/2)}m)</span>
+                                <span className="font-mono text-slate-500">Duration: {callDuration}s ({Math.floor(callDuration/2)}m)</span>
                               </div>
                               
                               <div className="grid grid-cols-2 gap-2 text-center text-xs">
-                                <div className="bg-white border border-slate-200 p-2.5 rounded-lg">
-                                  <span className="block text-[9px] text-slate-450 uppercase font-mono">Free Tier</span>
+                                <div className="bg-white border border-slate-200 p-2 rounded-lg">
+                                  <span className="block text-[8px] text-slate-400 uppercase font-mono">Free Minutes</span>
                                   <strong className="block font-mono text-emerald-650">{mockFreeMinutes} min left</strong>
                                 </div>
-                                <div className="bg-white border border-slate-200 p-2.5 rounded-lg">
-                                  <span className="block text-[9px] text-slate-450 uppercase font-mono">Wallet balance</span>
+                                <div className="bg-white border border-slate-200 p-2 rounded-lg">
+                                  <span className="block text-[8px] text-slate-400 uppercase font-mono">Client Wallet</span>
                                   <strong className="block font-mono text-slate-800">₹{mockWalletBalance}</strong>
                                 </div>
                               </div>
 
                               <button 
                                 onClick={stopMockCall}
-                                className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs py-2 rounded-lg cursor-pointer"
+                                className="w-full bg-rose-500 hover:bg-rose-600 text-white font-bold text-[10px] py-1.5 rounded-lg cursor-pointer"
                               >
                                 End Session
                               </button>
@@ -770,89 +972,24 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
                           )}
 
                           {mockCallState === 'ended' && (
-                            <div className="bg-slate-50 p-4 rounded-xl text-center space-y-2 border border-slate-200 text-xs">
-                              <CheckCircle2 className="w-8 h-8 text-emerald-550 mx-auto" />
-                              <strong className="block text-slate-850">Call Disconnected</strong>
-                              <span className="block text-[10px] text-slate-500 leading-relaxed font-medium">
-                                Wallet debited by <strong>₹{totalCharged}</strong>. Advocate receives 80% split (₹{totalCharged * 0.80}) into virtual chambers account.
+                            <div className="bg-slate-50 p-3 rounded-xl text-center space-y-1.5 border border-slate-200 text-xs">
+                              <CheckCircle2 className="w-6 h-6 text-emerald-550 mx-auto" />
+                              <strong className="block text-slate-850 text-xs">Session Logged</strong>
+                              <span className="block text-[9px] text-slate-505 leading-relaxed font-medium">
+                                Client billed <strong>₹{totalCharged}</strong>. Advocate earns 80% split (₹{totalCharged * 0.80}).
                               </span>
                               <button 
                                 onClick={resetMockCall}
-                                className="mt-2 text-amber-605 hover:text-amber-700 hover:underline flex items-center gap-1 justify-center mx-auto font-bold"
+                                className="text-amber-605 hover:text-amber-700 hover:underline flex items-center gap-1 justify-center mx-auto font-bold text-[10px]"
                               >
-                                <RotateCcw className="w-3.5 h-3.5" /> Retry simulation
+                                <RotateCcw className="w-3 h-3" /> Retry simulation
                               </button>
                             </div>
                           )}
                         </div>
 
-                        <div className="text-[10px] text-slate-450 leading-relaxed pt-2 border-t border-slate-100 font-medium">
-                          Agora SDK is fully integrated to bind metered billing to the actual channel connection timestamps.
-                        </div>
-                      </div>
-
-                      {/* Module C: Interactive KYC Audit Flow */}
-                      <div className="bg-white border border-slate-205 p-6 rounded-2xl space-y-4 flex flex-col justify-between shadow-sm">
-                        <div className="space-y-4">
-                          <h3 className="font-display font-bold text-xs uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                            <ShieldAlert className="w-4 h-4 text-amber-655" />
-                            <span>Advocate Credentials Registry</span>
-                          </h3>
-
-                          <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2.5 text-xs text-left">
-                            <div className="flex justify-between items-center">
-                              <strong className="text-slate-800 font-bold">{kycLawyerName}</strong>
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                                kycStatus === 'pending' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
-                                kycStatus === 'verified' ? 'bg-emerald-100 text-emerald-800 border border-emerald-250' :
-                                'bg-rose-100 text-rose-800 border border-rose-250'
-                              }`}>
-                                {kycStatus}
-                              </span>
-                            </div>
-                            
-                            <div className="space-y-1.5 text-[10px] text-slate-600 leading-relaxed font-mono bg-white p-2.5 rounded-lg border border-slate-150">
-                              <div>LLB: University of Delhi (2015)</div>
-                              <div>Bar Enrolment No: D/4021/2015</div>
-                              <div>KYC status: Aadhaar & PAN Match</div>
-                            </div>
-
-                            <div className="flex gap-2 pt-1.5">
-                              {kycStatus === 'pending' ? (
-                                <>
-                                  <button 
-                                    onClick={handleKycApprove}
-                                    className="flex-1 bg-emerald-600 hover:bg-emerald-750 text-white font-bold text-[10px] py-2 rounded-lg cursor-pointer transition-colors"
-                                  >
-                                    Approve Advocate
-                                  </button>
-                                  <button 
-                                    onClick={handleKycReject}
-                                    className="flex-1 bg-slate-100 hover:bg-slate-200 text-rose-600 border border-slate-200 font-bold text-[10px] py-2 rounded-lg cursor-pointer transition-colors"
-                                  >
-                                    Reject
-                                  </button>
-                                </>
-                              ) : (
-                                <button 
-                                  onClick={handleKycReset}
-                                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[10px] py-2 rounded-lg cursor-pointer flex items-center justify-center gap-1 border border-slate-200 transition-colors"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5 text-slate-500" /> Re-trigger KYC Audit
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="bg-slate-50 border border-slate-200 p-3 rounded-lg text-[9px] text-slate-500 h-20 overflow-y-auto space-y-1.5 font-mono">
-                          <span className="block font-bold text-slate-455 mb-1">AUDIT LOG:</span>
-                          {kycLog.map((log, idx) => (
-                            <div key={idx} className="flex items-start gap-1">
-                              <span className="text-amber-500">▶</span>
-                              <span>{log}</span>
-                            </div>
-                          ))}
+                        <div className="text-[9px] text-slate-400 pt-2 border-t border-slate-100 font-medium">
+                          Agora RTC web hooks are registered to trigger database billing updates dynamically upon session status changes.
                         </div>
                       </div>
 
@@ -860,7 +997,7 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
                   </div>
                 )}
 
-                {/* 10. INVESTMENT ASK SLIDE */}
+                {/* 11. INVESTMENT ASK SLIDE */}
                 {SLIDES[currentSlideIndex].id === 'investment-ask' && (
                   <div className="space-y-6 text-left">
                     <div>
