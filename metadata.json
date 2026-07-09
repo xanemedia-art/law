@@ -1,0 +1,9 @@
+{
+  "name": "LegalTalk India",
+  "description": "High-fidelity marketplace connecting users instantly with verified Indian lawyers via chat, voice, and video. Includes AI Legal Assistant, interactive client/lawyer/admin spaces, a dynamic minute-based billing engine, and a developer deployment suite.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

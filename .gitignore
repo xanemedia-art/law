@@ -1,0 +1,27 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Gradle files
+.gradle/
+android/.gradle/
+android/build/
+android/app/build/
+
+# Local configuration files
+local.properties
+
+# Android Studio folders and files
+.idea/
+*.iml
+
+# Compressed archives / binary dependencies
+*.zip
+*.rar
+*.tar.gz
+*.tar
