@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Scale, ShieldCheck, RefreshCw, Check, ArrowLeft, Sun, Moon, FileText, Phone, Mail, Award, CheckCircle2, AlertTriangle, XCircle, X } from 'lucide-react';
+import { Users, Scale, ShieldCheck, RefreshCw, Check, ArrowLeft, Sun, Moon, FileText, Phone, Mail, Award, CheckCircle2, AlertTriangle, XCircle, X, LogOut } from 'lucide-react';
 import { User } from '../types';
 
 interface AdminDashboardProps {
@@ -151,6 +151,17 @@ export default function AdminDashboard({ currentUser, theme, onToggleTheme }: Ad
             className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
           >
             <RefreshCw className="w-3.5 h-3.5" /> Refresh List
+          </button>
+          <button 
+            onClick={() => {
+              localStorage.removeItem("currentUser");
+              navigate('/login');
+            }}
+            className="p-2.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-400 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+            title="Sign out of Admin Console"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Logout</span>
           </button>
         </div>
       </div>

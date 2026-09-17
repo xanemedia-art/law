@@ -124,7 +124,9 @@ let users: User[] = [
   let cases: Case[] = [];
   let signals: WebRTCSignal[] = [];
 
-  const DB_FILE = path.resolve(process.cwd(), "scratch", "local_db.json");
+  const DB_FILE = process.env.VERCEL 
+    ? path.join(os.tmpdir(), "legaltalk_local_db.json") 
+    : path.resolve(process.cwd(), "scratch", "local_db.json");
 
   function saveLocalDb() {
     try {
@@ -143,14 +145,35 @@ let users: User[] = [
         signals
       }, null, 2));
     } catch (e) {
-      // Ignore in read-only / serverless environment
+      try {
+        const tmpFile = path.join(os.tmpdir(), "legaltalk_local_db.json");
+        fs.writeFileSync(tmpFile, JSON.stringify({
+          users,
+          lawyerProfiles,
+          wallets,
+          walletTransactions,
+          consultations,
+          consultationMessages,
+          reviews,
+          withdrawals,
+          cases,
+          signals
+        }, null, 2));
+      } catch (innerErr) {
+        // Ignore in read-only / serverless environment fallback
+      }
     }
   }
 
   function loadLocalDb() {
     try {
-      if (fs.existsSync(DB_FILE)) {
-        const data = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+      let targetFile = DB_FILE;
+      if (!fs.existsSync(targetFile)) {
+        const tmpFile = path.join(os.tmpdir(), "legaltalk_local_db.json");
+        if (fs.existsSync(tmpFile)) targetFile = tmpFile;
+      }
+      if (fs.existsSync(targetFile)) {
+        const data = JSON.parse(fs.readFileSync(targetFile, "utf-8"));
         if (data.users && data.users.length) users = data.users;
         if (data.lawyerProfiles && data.lawyerProfiles.length) lawyerProfiles = data.lawyerProfiles;
         if (data.wallets) wallets = data.wallets;
@@ -160,7 +183,7 @@ let users: User[] = [
         if (data.reviews) reviews = data.reviews;
         if (data.cases) cases = data.cases;
         if (data.signals) signals = data.signals;
-        console.log(`[Local DB] Restored ${users.length} users and ${consultations.length} consultations.`);
+        console.log(`[Local DB] Restored ${users.length} users and ${consultations.length} consultations from ${targetFile}.`);
       }
     } catch (e) {
       // Ignore
@@ -1117,15 +1140,18 @@ let users: User[] = [
         }
 
         if (!userRow) {
+          const rawPassword = req.body.password || "password123";
+          const passwordHash = hashPassword(rawPassword);
           const { data: newUser, error: uErr } = await supabase
             .from('users')
             .insert([{
               name: fullName,
-              email,
+              email: email.trim().toLowerCase(),
               mobile,
               role: 'lawyer',
               city: practiceDistrict || "India Office",
               language: languages?.join(", ") || "Hindi",
+              password_hash: passwordHash,
               is_blocked: false
             }])
             .select()
@@ -1135,14 +1161,18 @@ let users: User[] = [
           finalUserId = newUser.id;
         } else {
           // Update existing user details if they onboarding
+          const userUpdate: any = {
+            name: fullName,
+            mobile,
+            city: practiceDistrict || userRow.city,
+            language: languages?.join(", ") || userRow.language
+          };
+          if (req.body.password) {
+            userUpdate.password_hash = hashPassword(req.body.password);
+          }
           const { data: updatedUser } = await supabase
             .from('users')
-            .update({
-              name: fullName,
-              mobile,
-              city: practiceDistrict || userRow.city,
-              language: languages?.join(", ") || userRow.language
-            })
+            .update(userUpdate)
             .eq('id', finalUserId)
             .select()
             .single();

@@ -47,6 +47,7 @@ interface AppRoutesProps {
   allUsers: User[];
   onSelectUser: (user: User) => void;
   onLogin: (user: User) => void;
+  onLogout: () => void;
   onRegisterSuccess: () => void;
   onInitiateSession: (lawyerId: string, type: 'chat' | 'voice' | 'video') => void;
   theme: 'light' | 'dark';
@@ -58,6 +59,7 @@ function AppRoutes({
   allUsers,
   onSelectUser,
   onLogin,
+  onLogout,
   onRegisterSuccess,
   onInitiateSession,
   theme,
@@ -284,6 +286,11 @@ export default function App() {
     localStorage.setItem("currentUser", JSON.stringify(user));
   };
 
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem("currentUser");
+  };
+
   const handleRegisterSuccess = () => {
     fetchInitialContext();
   };
@@ -330,6 +337,7 @@ export default function App() {
         allUsers={allUsers}
         onSelectUser={handleSelectUser}
         onLogin={handleLogin}
+        onLogout={handleLogout}
         onRegisterSuccess={handleRegisterSuccess}
         onInitiateSession={handleInitiateSession}
         theme={theme}

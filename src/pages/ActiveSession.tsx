@@ -138,13 +138,42 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
   // -------------------------------------------------------------
   // 2. REAL-TIME CHAT ENGINE (SUPABASE REALTIME + 2S POLLING FALLBACK)
   // -------------------------------------------------------------
+  const playMessageChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.25);
+    } catch (e) {
+      // Audio autoplay policy fallback
+    }
+  };
+
   const fetchMessages = async () => {
     if (!session) return;
     try {
       const res = await fetch('/api/consultations/messages/' + session.id);
       const data = await res.json();
       if (Array.isArray(data.messages)) {
-        setMessages(data.messages);
+        setMessages(prev => {
+          const hasNewFromPeer = data.messages.some(
+            (m: ConsultationMessage) => m.senderId !== myUserId && !prev.some(p => p.id === m.id)
+          );
+          if (hasNewFromPeer && prev.length > 0) {
+            playMessageChime();
+          }
+          return data.messages;
+        });
       }
     } catch (e) {
       console.error(e);
@@ -182,6 +211,9 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
               };
               setMessages(prev => {
                 if (prev.some(m => m.id === newMsg.id)) return prev;
+                if (newMsg.senderId !== myUserId) {
+                  playMessageChime();
+                }
                 return [...prev, newMsg];
               });
             }
