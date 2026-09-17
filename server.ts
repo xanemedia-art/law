@@ -786,7 +786,8 @@ let users: User[] = [
     res.json({
       supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://stgwfcanxhbqvolfpmft.supabase.co",
       supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_S8g3NfVeu6JGCEiyJgYrwQ_sH4MN99S",
-      agoraAppId: process.env.AGORA_APP_ID || process.env.VITE_AGORA_APP_ID || ""
+      agoraAppId: process.env.AGORA_APP_ID || process.env.VITE_AGORA_APP_ID || "",
+      razorpayKeyId: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || ""
     });
   });
 
@@ -3398,46 +3399,23 @@ Rules:
     try {
       const client = getGeminiClient();
       if (client) {
-        // Try calling the live Gemini API with cascading fallback models
-        try {
-          // 1. Try gemini-3.5-flash
-          const gResponse = await client.models.generateContent({
-            model: "gemini-3.5-flash",
-            contents: prompt,
-            config: {
-              systemInstruction: systemPrompt,
-              temperature: 0.7,
-              tools: [{ googleSearch: {} }]
-            }
-          });
-          responseText = gResponse.text;
-        } catch (err35) {
-          console.warn("Primary gemini-3.5-flash failed/experiencing high demand. Trying gemini-2.5-flash...", err35);
+        const candidateModels = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
+        for (const modelName of candidateModels) {
           try {
-            // 2. Try gemini-2.5-flash
-            const gResponse25 = await client.models.generateContent({
-              model: "gemini-2.5-flash",
+            const gResponse = await client.models.generateContent({
+              model: modelName,
               contents: prompt,
               config: {
                 systemInstruction: systemPrompt,
-                temperature: 0.7,
-                tools: [{ googleSearch: {} }]
+                temperature: 0.7
               }
             });
-            responseText = gResponse25.text;
-          } catch (err25) {
-            console.warn("gemini-2.5-flash failed/overloaded. Trying gemini-1.5-flash...", err25);
-            // 3. Try gemini-1.5-flash
-            const gResponse15 = await client.models.generateContent({
-              model: "gemini-1.5-flash",
-              contents: prompt,
-              config: {
-                systemInstruction: systemPrompt,
-                temperature: 0.7,
-                tools: [{ googleSearch: {} }]
-              }
-            });
-            responseText = gResponse15.text;
+            if (gResponse && gResponse.text) {
+              responseText = gResponse.text;
+              break;
+            }
+          } catch (modelErr: any) {
+            console.warn(`Model ${modelName} failed, attempting next model in cascade...`, modelErr?.message?.substring(0, 120));
           }
         }
       }
