@@ -7,10 +7,8 @@ dotenv.config();
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
-import admin from "firebase-admin";
 import crypto from "crypto";
 import fs from "fs";
 import os from "os";
@@ -51,6 +49,23 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 app.use(express.json());
+
+// CORS & Path Normalizing Middleware for Vercel Serverless Function compatibility
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  // Restore true requested URL if Vercel serverless gateway altered or stripped it
+  const matchedPath = (req.headers['x-matched-path'] as string) || (req.headers['x-vercel-matched-path'] as string);
+  if (matchedPath && matchedPath.startsWith('/api') && req.url !== matchedPath) {
+    req.url = matchedPath;
+  }
+  next();
+});
 
 // -------------------------------------------------------------
 // IN-MEMORY & DURABLE LOCAL DISK REPOSITORY
@@ -632,42 +647,46 @@ let users: User[] = [
     }
   }
 
-  seedDefaultAdmin();
-  seedDemoAccounts();
-  autoApproveExistingLawyers();
+  if (!process.env.VERCEL) {
+    seedDefaultAdmin().catch(console.error);
+    seedDemoAccounts().catch(console.error);
+    autoApproveExistingLawyers().catch(console.error);
+  }
 
   // -------------------------------------------------------------
-  // FIREBASE CLOUD MESSAGING (FCM) INITIALIZATION
+  // FIREBASE CLOUD MESSAGING (FCM) INITIALIZATION (OPTIONAL / ON-DEMAND)
   // -------------------------------------------------------------
   let fcmApp: any = null;
 
-  try {
-    const serviceAccountPath = path.resolve(process.cwd(), "firebase-service-account.json");
-    const hasServiceAccount = fs.existsSync(serviceAccountPath);
+  async function initFCM() {
+    try {
+      const serviceAccountPath = path.resolve(process.cwd(), "firebase-service-account.json");
+      const hasServiceAccount = fs.existsSync(serviceAccountPath);
 
-    if (hasServiceAccount) {
-      const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
-      fcmApp = admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-      }, "legaltalk-fcm");
-      console.log("[Firebase Admin] Initialized FCM using firebase-service-account.json");
-    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      fcmApp = admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-      }, "legaltalk-fcm");
-      console.log("[Firebase Admin] Initialized FCM using environment variables JSON certificate");
-    } else {
-      console.warn("[Firebase Admin] No firebase-service-account.json or FIREBASE_SERVICE_ACCOUNT_JSON detected. Push alerts will be simulated.");
+      if (hasServiceAccount || process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+        const admin = (await import("firebase-admin")).default || (await import("firebase-admin"));
+        const serviceAccount = hasServiceAccount 
+          ? JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"))
+          : JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON!);
+        fcmApp = admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount)
+        }, "legaltalk-fcm");
+        console.log("[Firebase Admin] Initialized FCM successfully");
+      }
+    } catch (err: any) {
+      // Ignore in serverless or unconfigured environments
     }
-  } catch (err: any) {
-    console.error("[Firebase Admin] Failed initializing Firebase Admin:", err.message);
+  }
+
+  if (!process.env.VERCEL) {
+    initFCM().catch(() => {});
   }
 
   // Push notifications helper
   async function sendPushNotification(fcmToken: string, title: string, body: string, data: any = {}) {
     if (fcmApp && fcmToken && fcmToken !== "Pending" && fcmToken !== "") {
       try {
+        const admin = (await import("firebase-admin")).default || (await import("firebase-admin"));
         const message = {
           notification: { title, body },
           data: data,
@@ -3318,11 +3337,26 @@ Rules:
     res.sendFile(filePath);
   });
 
+  // 404 handler for API routes
+  app.use((req, res, next) => {
+    if (req.url.startsWith("/api") || process.env.VERCEL) {
+      return res.status(404).json({ error: `API route not found: ${req.method} ${req.url}` });
+    }
+    next();
+  });
+
+  // Global error handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("[Unhandled Server Error]:", err);
+    res.status(500).json({ error: err?.message || "Internal server error" });
+  });
+
   // -------------------------------------------------------------
   // VITE DEV SERVER / PRODUCTION STATIC ASSET INJECTION
   // -------------------------------------------------------------
   async function startServer() {
     if (process.env.NODE_ENV !== "production") {
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",
