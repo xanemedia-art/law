@@ -456,15 +456,18 @@ let users: User[] = [
 
         if (!existingAdmin || existingAdmin.length === 0) {
           console.log("[Supabase Initializer] No admin user detected in public.users. Seeding default admin...");
+          const adminUserId = crypto.randomUUID();
           const { data: seededAdmin, error: seedErr } = await supabase
             .from('users')
             .insert([{
+              id: adminUserId,
               role: 'admin',
               name: 'Suresh Gupta',
               email: 'admin@legaltalk.in',
               mobile: '9900001122',
               city: 'Delhi',
               language: 'English, Hindi',
+              password_hash: hashPassword('admin123'),
               is_blocked: false
             }])
             .select()
@@ -476,8 +479,7 @@ let users: User[] = [
             console.log("[Supabase Initializer] Default admin user seeded successfully with ID:", seededAdmin.id);
             const { error: walletErr } = await supabase
               .from('wallets')
-              .update({ balance: 50000.00 })
-              .eq('user_id', seededAdmin.id);
+              .upsert([{ user_id: seededAdmin.id, balance: 50000.00 }]);
             if (walletErr) {
               console.error("[Supabase Initializer] Failed to set admin wallet balance:", walletErr);
             }
@@ -534,13 +536,16 @@ let users: User[] = [
           console.error("[Supabase Initializer] Error checking client@demo.in presence:", checkClientErr);
         } else if (!clientExists) {
           console.log("[Supabase Initializer] Seeding client@demo.in...");
+          clientUserId = crypto.randomUUID();
           const clientData = {
+            id: clientUserId,
             role: 'client',
             name: 'Demo Client',
             email: 'client@demo.in',
             mobile: '9876543210',
             city: 'Delhi',
             language: 'English, Hindi',
+            password_hash: hashPassword('password123'),
             is_blocked: false
           };
 
@@ -577,8 +582,7 @@ let users: User[] = [
             // Update client wallet balance to 500
             const { error: clientWalletErr } = await supabase
               .from('wallets')
-              .update({ balance: 500.00 })
-              .eq('user_id', clientUserId);
+              .upsert([{ user_id: clientUserId, balance: 500.00 }]);
             if (clientWalletErr) {
               console.error("[Supabase Initializer] Failed to set client wallet balance:", clientWalletErr);
             }
@@ -603,15 +607,18 @@ let users: User[] = [
           console.error("[Supabase Initializer] Error checking advocate@demo.in presence:", checkAdvocateErr);
         } else if (!advocateExists) {
           console.log("[Supabase Initializer] Seeding advocate@demo.in...");
+          advocateUserId = crypto.randomUUID();
           const { data: seededAdvocate, error: seedAdvocateErr } = await supabase
             .from('users')
             .insert([{
+              id: advocateUserId,
               role: 'lawyer',
               name: 'Adv. Rajesh Kumar',
               email: 'advocate@demo.in',
               mobile: '9988776655',
               city: 'Delhi',
               language: 'English, Hindi',
+              password_hash: hashPassword('password123'),
               is_blocked: false
             }])
             .select()
@@ -628,6 +635,7 @@ let users: User[] = [
             const { error: seedProfileErr } = await supabase
               .from('lawyers')
               .insert([{
+                id: crypto.randomUUID(),
                 user_id: advocateUserId,
                 bar_council_number: 'D/992/2012',
                 state_bar_council: 'Delhi Bar Council',
@@ -660,6 +668,10 @@ let users: User[] = [
             } else {
               console.log("[Supabase Initializer] advocate profile seeded successfully.");
             }
+
+            await supabase
+              .from('wallets')
+              .upsert([{ user_id: advocateUserId, balance: 2500.00 }]);
           }
         }
       } catch (err) {
@@ -1032,9 +1044,11 @@ let users: User[] = [
         const rawPassword = req.body.password || "password123";
         const passwordHash = hashPassword(rawPassword);
 
+        const newUserId = crypto.randomUUID();
         const { data: newUser, error } = await supabase
           .from('users')
           .insert([{ 
+            id: newUserId,
             name, 
             email: email.trim().toLowerCase(), 
             mobile, 
@@ -1051,21 +1065,27 @@ let users: User[] = [
         if (error) throw error;
 
         // Welcome bonus
-        await supabase.from('wallets').update({ balance: 100 }).eq('user_id', newUser.id);
-        await supabase.from('wallet_transactions').insert([{
-          wallet_id: newUser.id,
-          amount: 100,
-          type: 'deposit',
-          status: 'completed',
-          description: 'Welcome bonus deposit (Simulated)'
-        }]);
+        try {
+          await supabase.from('wallets').upsert([{ user_id: newUser.id, balance: 100 }]);
+          await supabase.from('wallet_transactions').insert([{
+            id: crypto.randomUUID(),
+            wallet_id: newUser.id,
+            amount: 100,
+            type: 'deposit',
+            status: 'completed',
+            description: 'Welcome bonus deposit (Simulated)'
+          }]);
 
-        await supabase.from('audit_logs').insert([{
-          user_id: newUser.id,
-          user_email: email,
-          action: 'USER_REGISTERED',
-          details: { role, name }
-        }]);
+          await supabase.from('audit_logs').insert([{
+            id: crypto.randomUUID(),
+            user_id: newUser.id,
+            user_email: email,
+            action: 'USER_REGISTERED',
+            details: { role, name }
+          }]);
+        } catch (postErr) {
+          console.warn("[Registration side-effect warning]:", postErr);
+        }
 
         return res.status(201).json({ user: mapUserToTS(newUser) });
       }
@@ -1177,9 +1197,11 @@ let users: User[] = [
         if (!userRow) {
           const rawPassword = req.body.password || "password123";
           const passwordHash = hashPassword(rawPassword);
+          const newUserId = crypto.randomUUID();
           const { data: newUser, error: uErr } = await supabase
             .from('users')
             .insert([{
+              id: newUserId,
               name: fullName,
               email: email.trim().toLowerCase(),
               mobile,
@@ -1241,6 +1263,7 @@ let users: User[] = [
         const { data: profile, error: pErr } = await supabase
           .from('lawyers')
           .insert([{
+            id: crypto.randomUUID(),
             user_id: finalUserId,
             bar_council_number: barCouncilNumber,
             state_bar_council: stateBarCouncil,
@@ -1272,12 +1295,15 @@ let users: User[] = [
           .single();
         if (pErr) throw pErr;
 
-        await supabase.from('audit_logs').insert([{
-          user_id: finalUserId,
-          user_email: email,
-          action: 'LAWYER_APPLICATION_SUBMITTED',
-          details: { barCouncilNumber }
-        }]);
+        try {
+          await supabase.from('audit_logs').insert([{
+            id: crypto.randomUUID(),
+            user_id: finalUserId,
+            user_email: email,
+            action: 'LAWYER_APPLICATION_SUBMITTED',
+            details: { barCouncilNumber }
+          }]);
+        } catch (audErr) {}
 
         return res.status(201).json({ user: mapUserToTS(userRow), profile: mapLawyerToTS(profile) });
       }
@@ -1553,6 +1579,7 @@ let users: User[] = [
           const { data: newProfile, error: insErr } = await supabase
             .from('lawyers')
             .insert([{
+              id: crypto.randomUUID(),
               user_id: userId,
               bar_council_number: updates.bar_association_name || 'BC-' + Date.now(),
               state_bar_council: updates.place_of_practice || 'Delhi Bar Council',
@@ -1701,6 +1728,7 @@ let users: User[] = [
         if (uErr) throw uErr;
 
         await supabase.from('wallet_transactions').insert([{
+          id: crypto.randomUUID(),
           wallet_id: userId,
           amount: 1200,
           type: 'deduction',
@@ -1709,6 +1737,7 @@ let users: User[] = [
         }]);
 
         await supabase.from('audit_logs').insert([{
+          id: crypto.randomUUID(),
           user_id: userId,
           action: 'LAWYER_SUBSCRIPTION_PAID',
           details: { subscriptionExpiresAt: oneYearFromNow }
@@ -1816,6 +1845,7 @@ let users: User[] = [
         const { data: tx, error: tErr } = await supabase
           .from('wallet_transactions')
           .insert([{
+            id: crypto.randomUUID(),
             wallet_id: userId,
             amount: val,
             type: 'deposit',
@@ -1828,6 +1858,7 @@ let users: User[] = [
         if (tErr) throw tErr;
 
         await supabase.from('audit_logs').insert([{
+          id: crypto.randomUUID(),
           user_id: userId,
           action: 'WALLET_DEPOSITED',
           details: { amount: val, rzpOrderId }
@@ -2115,6 +2146,7 @@ let users: User[] = [
           await supabase.from('wallets').update({ balance: newLawyerBal }).eq('user_id', session.lawyer_id);
 
           await supabase.from('commission_logs').insert([{
+            id: crypto.randomUUID(),
             consultation_id: session.id,
             total_amount: sessionCost,
             lawyer_share: lawyerReceipt,
@@ -2123,6 +2155,7 @@ let users: User[] = [
 
           await supabase.from('wallet_transactions').insert([
             {
+              id: crypto.randomUUID(),
               wallet_id: session.client_id,
               amount: currentBal,
               type: 'deduction',
@@ -2130,6 +2163,7 @@ let users: User[] = [
               description: `Exhausted session costs: Completed ${endMins} minutes booking.`
             },
             {
+              id: crypto.randomUUID(),
               wallet_id: session.lawyer_id,
               amount: lawyerReceipt,
               type: 'credit',
@@ -2302,6 +2336,7 @@ let users: User[] = [
         await supabase.from('wallets').update({ balance: newLawyerBal }).eq('user_id', session.lawyer_id);
 
         await supabase.from('commission_logs').insert([{
+          id: crypto.randomUUID(),
           consultation_id: session.id,
           total_amount: sessionCost,
           lawyer_share: lawyerReceipt,
@@ -2310,6 +2345,7 @@ let users: User[] = [
 
         await supabase.from('wallet_transactions').insert([
           {
+            id: crypto.randomUUID(),
             wallet_id: session.client_id,
             amount: sessionCost,
             type: 'deduction',
@@ -2317,6 +2353,7 @@ let users: User[] = [
             description: `Billed for ${session.type} consultation with ${session.lawyer_name}.`
           },
           {
+            id: crypto.randomUUID(),
             wallet_id: session.lawyer_id,
             amount: lawyerReceipt,
             type: 'credit',
@@ -2326,6 +2363,7 @@ let users: User[] = [
         ]);
 
         await supabase.from('audit_logs').insert([{
+          id: crypto.randomUUID(),
           user_id: session.client_id,
           action: 'CONSULTATION_COMPLETED',
           details: { consultationId, minutes: totalMinutes, totalCost: sessionCost }
@@ -2590,6 +2628,7 @@ let users: User[] = [
         const { data: newRev, error: rErr } = await supabase
           .from('reviews')
           .insert([{
+            id: crypto.randomUUID(),
             consultation_id: consultationId,
             client_name: session.client_name,
             lawyer_id: session.lawyer_id,
@@ -2669,6 +2708,7 @@ let users: User[] = [
         const { data: withdrawal, error: wErr } = await supabase
           .from('withdrawals')
           .insert([{
+            id: crypto.randomUUID(),
             lawyer_id: userId,
             lawyer_name: user.name,
             amount: requestVal,
@@ -2685,6 +2725,7 @@ let users: User[] = [
         await supabase.from('wallets').update({ balance: newBal }).eq('user_id', userId);
 
         await supabase.from('wallet_transactions').insert([{
+          id: crypto.randomUUID(),
           wallet_id: userId,
           amount: requestVal,
           type: 'withdrawal',
@@ -2862,7 +2903,7 @@ let users: User[] = [
         if (uErr) throw uErr;
 
         await supabase.from('audit_logs').insert([{
-          user_id: "u-admin-1",
+          id: crypto.randomUUID(),
           user_email: "admin@legaltalk.in",
           action: `LAWYER_VERIFICATION_${action.toUpperCase()}`,
           details: { lawyerId: id }
@@ -2912,7 +2953,7 @@ let users: User[] = [
         if (uErr) throw uErr;
 
         await supabase.from('audit_logs').insert([{
-          user_id: "u-admin-1",
+          id: crypto.randomUUID(),
           user_email: "admin@legaltalk.in",
           action: isBlocked ? "USER_BLOCKED" : "USER_UNBLOCKED",
           details: { userId: id, name: user.name }
@@ -2977,7 +3018,7 @@ let users: User[] = [
         }
 
         await supabase.from('audit_logs').insert([{
-          user_id: "u-admin-1",
+          id: crypto.randomUUID(),
           user_email: "admin@legaltalk.in",
           action: "WITHDRAWAL_APPROVED",
           details: { lawyerId: reqData.lawyer_id, amount: reqData.amount }
@@ -3022,9 +3063,18 @@ let users: User[] = [
       const code = `ADM-INV-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
       if (supabase) {
+        let validCreatorId = null;
+        if (adminId && adminId.length >= 32) {
+          validCreatorId = adminId;
+        }
         const { data: invite, error } = await supabase
           .from('admin_invitations')
-          .insert([{ code, created_by: adminId || null, is_used: false }])
+          .insert([{ 
+            id: crypto.randomUUID(),
+            code, 
+            created_by: validCreatorId, 
+            is_used: false 
+          }])
           .select()
           .single();
         if (error) throw error;
@@ -3085,6 +3135,7 @@ let users: User[] = [
         const { data, error } = await supabase
           .from('cases')
           .insert([{
+            id: crypto.randomUUID(),
             client_id: clientId,
             client_name: clientName,
             title,

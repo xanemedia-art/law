@@ -319,20 +319,23 @@ async function seedDefaultAdmin() {
       }
       if (!existingAdmin || existingAdmin.length === 0) {
         console.log("[Supabase Initializer] No admin user detected in public.users. Seeding default admin...");
+        const adminUserId = crypto.randomUUID();
         const { data: seededAdmin, error: seedErr } = await supabase.from("users").insert([{
+          id: adminUserId,
           role: "admin",
           name: "Suresh Gupta",
           email: "admin@legaltalk.in",
           mobile: "9900001122",
           city: "Delhi",
           language: "English, Hindi",
+          password_hash: hashPassword("admin123"),
           is_blocked: false
         }]).select().single();
         if (seedErr) {
           console.error("[Supabase Initializer] Failed to seed default admin user:", seedErr);
         } else {
           console.log("[Supabase Initializer] Default admin user seeded successfully with ID:", seededAdmin.id);
-          const { error: walletErr } = await supabase.from("wallets").update({ balance: 5e4 }).eq("user_id", seededAdmin.id);
+          const { error: walletErr } = await supabase.from("wallets").upsert([{ user_id: seededAdmin.id, balance: 5e4 }]);
           if (walletErr) {
             console.error("[Supabase Initializer] Failed to set admin wallet balance:", walletErr);
           }
@@ -370,13 +373,16 @@ async function seedDemoAccounts() {
         console.error("[Supabase Initializer] Error checking client@demo.in presence:", checkClientErr);
       } else if (!clientExists) {
         console.log("[Supabase Initializer] Seeding client@demo.in...");
+        clientUserId = crypto.randomUUID();
         const clientData = {
+          id: clientUserId,
           role: "client",
           name: "Demo Client",
           email: "client@demo.in",
           mobile: "9876543210",
           city: "Delhi",
           language: "English, Hindi",
+          password_hash: hashPassword("password123"),
           is_blocked: false
         };
         let seededClient = null;
@@ -400,7 +406,7 @@ async function seedDemoAccounts() {
         if (seededClient) {
           clientUserId = seededClient.id;
           console.log("[Supabase Initializer] client@demo.in user seeded successfully with ID:", clientUserId);
-          const { error: clientWalletErr } = await supabase.from("wallets").update({ balance: 500 }).eq("user_id", clientUserId);
+          const { error: clientWalletErr } = await supabase.from("wallets").upsert([{ user_id: clientUserId, balance: 500 }]);
           if (clientWalletErr) {
             console.error("[Supabase Initializer] Failed to set client wallet balance:", clientWalletErr);
           }
@@ -418,13 +424,16 @@ async function seedDemoAccounts() {
         console.error("[Supabase Initializer] Error checking advocate@demo.in presence:", checkAdvocateErr);
       } else if (!advocateExists) {
         console.log("[Supabase Initializer] Seeding advocate@demo.in...");
+        advocateUserId = crypto.randomUUID();
         const { data: seededAdvocate, error: seedAdvocateErr } = await supabase.from("users").insert([{
+          id: advocateUserId,
           role: "lawyer",
           name: "Adv. Rajesh Kumar",
           email: "advocate@demo.in",
           mobile: "9988776655",
           city: "Delhi",
           language: "English, Hindi",
+          password_hash: hashPassword("password123"),
           is_blocked: false
         }]).select().single();
         if (seedAdvocateErr) {
@@ -434,6 +443,7 @@ async function seedDemoAccounts() {
           console.log("[Supabase Initializer] advocate@demo.in user seeded successfully with ID:", advocateUserId);
           const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1e3).toISOString();
           const { error: seedProfileErr } = await supabase.from("lawyers").insert([{
+            id: crypto.randomUUID(),
             user_id: advocateUserId,
             bar_council_number: "D/992/2012",
             state_bar_council: "Delhi Bar Council",
@@ -465,6 +475,7 @@ async function seedDemoAccounts() {
           } else {
             console.log("[Supabase Initializer] advocate profile seeded successfully.");
           }
+          await supabase.from("wallets").upsert([{ user_id: advocateUserId, balance: 2500 }]);
         }
       }
     } catch (err) {
@@ -747,7 +758,9 @@ app.post("/api/auth/register", async (req, res) => {
       }
       const rawPassword2 = req.body.password || "password123";
       const passwordHash2 = hashPassword(rawPassword2);
+      const newUserId = crypto.randomUUID();
       const { data: newUser2, error } = await supabase.from("users").insert([{
+        id: newUserId,
         name,
         email: email.trim().toLowerCase(),
         mobile,
@@ -760,20 +773,26 @@ app.post("/api/auth/register", async (req, res) => {
         free_chats_remaining: role === "client" ? 10 : 0
       }]).select().single();
       if (error) throw error;
-      await supabase.from("wallets").update({ balance: 100 }).eq("user_id", newUser2.id);
-      await supabase.from("wallet_transactions").insert([{
-        wallet_id: newUser2.id,
-        amount: 100,
-        type: "deposit",
-        status: "completed",
-        description: "Welcome bonus deposit (Simulated)"
-      }]);
-      await supabase.from("audit_logs").insert([{
-        user_id: newUser2.id,
-        user_email: email,
-        action: "USER_REGISTERED",
-        details: { role, name }
-      }]);
+      try {
+        await supabase.from("wallets").upsert([{ user_id: newUser2.id, balance: 100 }]);
+        await supabase.from("wallet_transactions").insert([{
+          id: crypto.randomUUID(),
+          wallet_id: newUser2.id,
+          amount: 100,
+          type: "deposit",
+          status: "completed",
+          description: "Welcome bonus deposit (Simulated)"
+        }]);
+        await supabase.from("audit_logs").insert([{
+          id: crypto.randomUUID(),
+          user_id: newUser2.id,
+          user_email: email,
+          action: "USER_REGISTERED",
+          details: { role, name }
+        }]);
+      } catch (postErr) {
+        console.warn("[Registration side-effect warning]:", postErr);
+      }
       return res.status(201).json({ user: mapUserToTS(newUser2) });
     }
     const existing = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
@@ -871,7 +890,9 @@ app.post("/api/lawyers/register", async (req, res) => {
       if (!userRow2) {
         const rawPassword = req.body.password || "password123";
         const passwordHash = hashPassword(rawPassword);
+        const newUserId = crypto.randomUUID();
         const { data: newUser, error: uErr } = await supabase.from("users").insert([{
+          id: newUserId,
           name: fullName,
           email: email.trim().toLowerCase(),
           mobile,
@@ -913,6 +934,7 @@ app.post("/api/lawyers/register", async (req, res) => {
         return res.json({ user: mapUserToTS(userRow2), profile: mapLawyerToTS(updatedProfile) });
       }
       const { data: profile2, error: pErr } = await supabase.from("lawyers").insert([{
+        id: crypto.randomUUID(),
         user_id: finalUserId2,
         bar_council_number: barCouncilNumber,
         state_bar_council: stateBarCouncil,
@@ -941,12 +963,16 @@ app.post("/api/lawyers/register", async (req, res) => {
         subscription_expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1e3).toISOString()
       }]).select().single();
       if (pErr) throw pErr;
-      await supabase.from("audit_logs").insert([{
-        user_id: finalUserId2,
-        user_email: email,
-        action: "LAWYER_APPLICATION_SUBMITTED",
-        details: { barCouncilNumber }
-      }]);
+      try {
+        await supabase.from("audit_logs").insert([{
+          id: crypto.randomUUID(),
+          user_id: finalUserId2,
+          user_email: email,
+          action: "LAWYER_APPLICATION_SUBMITTED",
+          details: { barCouncilNumber }
+        }]);
+      } catch (audErr) {
+      }
       return res.status(201).json({ user: mapUserToTS(userRow2), profile: mapLawyerToTS(profile2) });
     }
     let finalUserId = userId;
@@ -1191,6 +1217,7 @@ app.post("/api/lawyers/update-prices", async (req, res) => {
       if (!currentProfile) {
         const oneYearFromNow2 = new Date(Date.now() + 365 * 24 * 60 * 60 * 1e3).toISOString();
         const { data: newProfile, error: insErr } = await supabase.from("lawyers").insert([{
+          id: crypto.randomUUID(),
           user_id: userId,
           bar_council_number: updates.bar_association_name || "BC-" + Date.now(),
           state_bar_council: updates.place_of_practice || "Delhi Bar Council",
@@ -1312,6 +1339,7 @@ app.post("/api/lawyers/pay-subscription", async (req, res) => {
       const { data: updatedProfile, error: uErr } = await supabase.from("lawyers").update({ subscription_expires_at: oneYearFromNow }).eq("user_id", userId).select().single();
       if (uErr) throw uErr;
       await supabase.from("wallet_transactions").insert([{
+        id: crypto.randomUUID(),
         wallet_id: userId,
         amount: 1200,
         type: "deduction",
@@ -1319,6 +1347,7 @@ app.post("/api/lawyers/pay-subscription", async (req, res) => {
         description: "Annual Advocate Subscription Fee Paid (\u20B91200)"
       }]);
       await supabase.from("audit_logs").insert([{
+        id: crypto.randomUUID(),
         user_id: userId,
         action: "LAWYER_SUBSCRIPTION_PAID",
         details: { subscriptionExpiresAt: oneYearFromNow }
@@ -1404,6 +1433,7 @@ app.post("/api/wallet/deposit", async (req, res) => {
       const { error: upErr } = await supabase.from("wallets").update({ balance: newBal }).eq("user_id", userId);
       if (upErr) throw upErr;
       const { data: tx, error: tErr } = await supabase.from("wallet_transactions").insert([{
+        id: crypto.randomUUID(),
         wallet_id: userId,
         amount: val,
         type: "deposit",
@@ -1413,6 +1443,7 @@ app.post("/api/wallet/deposit", async (req, res) => {
       }]).select().single();
       if (tErr) throw tErr;
       await supabase.from("audit_logs").insert([{
+        id: crypto.randomUUID(),
         user_id: userId,
         action: "WALLET_DEPOSITED",
         details: { amount: val, rzpOrderId }
@@ -1649,6 +1680,7 @@ app.post("/api/consultations/bill-minute", async (req, res) => {
         const newLawyerBal = (lawyerWallet ? Number(lawyerWallet.balance) : 0) + lawyerReceipt;
         await supabase.from("wallets").update({ balance: newLawyerBal }).eq("user_id", session2.lawyer_id);
         await supabase.from("commission_logs").insert([{
+          id: crypto.randomUUID(),
           consultation_id: session2.id,
           total_amount: sessionCost,
           lawyer_share: lawyerReceipt,
@@ -1656,6 +1688,7 @@ app.post("/api/consultations/bill-minute", async (req, res) => {
         }]);
         await supabase.from("wallet_transactions").insert([
           {
+            id: crypto.randomUUID(),
             wallet_id: session2.client_id,
             amount: currentBal,
             type: "deduction",
@@ -1663,6 +1696,7 @@ app.post("/api/consultations/bill-minute", async (req, res) => {
             description: `Exhausted session costs: Completed ${endMins} minutes booking.`
           },
           {
+            id: crypto.randomUUID(),
             wallet_id: session2.lawyer_id,
             amount: lawyerReceipt,
             type: "credit",
@@ -1807,6 +1841,7 @@ app.post("/api/consultations/end", async (req, res) => {
       const newLawyerBal = (lWallet ? Number(lWallet.balance) : 0) + lawyerReceipt;
       await supabase.from("wallets").update({ balance: newLawyerBal }).eq("user_id", session2.lawyer_id);
       await supabase.from("commission_logs").insert([{
+        id: crypto.randomUUID(),
         consultation_id: session2.id,
         total_amount: sessionCost2,
         lawyer_share: lawyerReceipt,
@@ -1814,6 +1849,7 @@ app.post("/api/consultations/end", async (req, res) => {
       }]);
       await supabase.from("wallet_transactions").insert([
         {
+          id: crypto.randomUUID(),
           wallet_id: session2.client_id,
           amount: sessionCost2,
           type: "deduction",
@@ -1821,6 +1857,7 @@ app.post("/api/consultations/end", async (req, res) => {
           description: `Billed for ${session2.type} consultation with ${session2.lawyer_name}.`
         },
         {
+          id: crypto.randomUUID(),
           wallet_id: session2.lawyer_id,
           amount: lawyerReceipt,
           type: "credit",
@@ -1829,6 +1866,7 @@ app.post("/api/consultations/end", async (req, res) => {
         }
       ]);
       await supabase.from("audit_logs").insert([{
+        id: crypto.randomUUID(),
         user_id: session2.client_id,
         action: "CONSULTATION_COMPLETED",
         details: { consultationId, minutes: totalMinutes2, totalCost: sessionCost2 }
@@ -2040,6 +2078,7 @@ app.post("/api/reviews", async (req, res) => {
         return res.status(400).json({ error: "Review already submitted for this session" });
       }
       const { data: newRev2, error: rErr } = await supabase.from("reviews").insert([{
+        id: crypto.randomUUID(),
         consultation_id: consultationId,
         client_name: session2.client_name,
         lawyer_id: session2.lawyer_id,
@@ -2101,6 +2140,7 @@ app.post("/api/lawyers/withdraw", async (req, res) => {
         return res.status(400).json({ error: "Insufficient wallet balance to request withdrawal of \u20B9" + requestVal2 });
       }
       const { data: withdrawal, error: wErr } = await supabase.from("withdrawals").insert([{
+        id: crypto.randomUUID(),
         lawyer_id: userId,
         lawyer_name: user.name,
         amount: requestVal2,
@@ -2113,6 +2153,7 @@ app.post("/api/lawyers/withdraw", async (req, res) => {
       const newBal = curBal2 - requestVal2;
       await supabase.from("wallets").update({ balance: newBal }).eq("user_id", userId);
       await supabase.from("wallet_transactions").insert([{
+        id: crypto.randomUUID(),
         wallet_id: userId,
         amount: requestVal2,
         type: "withdrawal",
@@ -2262,7 +2303,7 @@ app.post("/api/admin/verify", async (req, res) => {
       const { data: updated, error: uErr } = await supabase.from("lawyers").update({ verification_status: action }).eq("user_id", id).select().single();
       if (uErr) throw uErr;
       await supabase.from("audit_logs").insert([{
-        user_id: "u-admin-1",
+        id: crypto.randomUUID(),
         user_email: "admin@legaltalk.in",
         action: `LAWYER_VERIFICATION_${action.toUpperCase()}`,
         details: { lawyerId: id }
@@ -2298,7 +2339,7 @@ app.post("/api/admin/block", async (req, res) => {
       const { data: updated, error: uErr } = await supabase.from("users").update({ is_blocked: !!isBlocked }).eq("id", id).select().single();
       if (uErr) throw uErr;
       await supabase.from("audit_logs").insert([{
-        user_id: "u-admin-1",
+        id: crypto.randomUUID(),
         user_email: "admin@legaltalk.in",
         action: isBlocked ? "USER_BLOCKED" : "USER_UNBLOCKED",
         details: { userId: id, name: user2.name }
@@ -2338,7 +2379,7 @@ app.post("/api/admin/approve-withdrawal", async (req, res) => {
         await supabase.from("wallet_transactions").update({ status: "completed", description: txs[0].description + " (Approved by Admin)" }).eq("id", txs[0].id);
       }
       await supabase.from("audit_logs").insert([{
-        user_id: "u-admin-1",
+        id: crypto.randomUUID(),
         user_email: "admin@legaltalk.in",
         action: "WITHDRAWAL_APPROVED",
         details: { lawyerId: reqData.lawyer_id, amount: reqData.amount }
@@ -2375,7 +2416,16 @@ app.post("/api/admin/generate-invite", async (req, res) => {
   try {
     const code = `ADM-INV-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     if (supabase) {
-      const { data: invite, error } = await supabase.from("admin_invitations").insert([{ code, created_by: adminId || null, is_used: false }]).select().single();
+      let validCreatorId = null;
+      if (adminId && adminId.length >= 32) {
+        validCreatorId = adminId;
+      }
+      const { data: invite, error } = await supabase.from("admin_invitations").insert([{
+        id: crypto.randomUUID(),
+        code,
+        created_by: validCreatorId,
+        is_used: false
+      }]).select().single();
       if (error) throw error;
       return res.status(201).json({ success: true, code: invite.code });
     }
@@ -2420,6 +2470,7 @@ app.post("/api/cases/create", async (req, res) => {
   try {
     if (supabase) {
       const { data, error } = await supabase.from("cases").insert([{
+        id: crypto.randomUUID(),
         client_id: clientId,
         client_name: clientName,
         title,
