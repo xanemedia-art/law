@@ -20,7 +20,14 @@ export default function Login({ allUsers, onLogin, theme, onToggleTheme }: Login
 
   const navigate = useNavigate();
 
-  const filteredUsers = allUsers.filter(u => u.role === role);
+  const defaultDemoUsers: User[] = [
+    { id: "u-client-demo", role: "client", name: "Demo Client", email: "client@demo.in", mobile: "9876543210" },
+    { id: "u-lawyer-demo", role: "lawyer", name: "Adv. Rajesh Kumar", email: "advocate@demo.in", mobile: "9988776655" },
+    { id: "u-admin-1", role: "admin", name: "Suresh Gupta", email: "admin@legaltalk.in", mobile: "9900001122" }
+  ];
+
+  const effectiveUsers = allUsers && allUsers.length > 0 ? allUsers : defaultDemoUsers;
+  const filteredUsers = effectiveUsers.filter(u => u.role === role);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
