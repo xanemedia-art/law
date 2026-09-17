@@ -878,15 +878,16 @@ let users: User[] = [
     }
   });
 
-  // WebRTC Signaling Channels (100% Free Peer-to-Peer Communication)
-  app.post("/api/consultations/signal", (req, res) => {
+  // WebRTC Signaling Channels (100% Free Peer-to-Peer Communication with Supabase Persistence)
+  app.post("/api/consultations/signal", async (req, res) => {
     const { consultationId, fromUserId, toUserId, type, payload } = req.body;
     if (!consultationId || !fromUserId || !type) {
       return res.status(400).json({ error: "Missing mandatory signal parameters (consultationId, fromUserId, type)." });
     }
 
+    const signalId = `sig-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newSignal: WebRTCSignal = {
-      id: `sig-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      id: signalId,
       consultationId,
       fromUserId,
       toUserId,
@@ -901,12 +902,83 @@ let users: User[] = [
     }
     saveLocalDb();
 
+    // Persist to Supabase if available so signals are shared across all serverless Vercel lambdas
+    if (supabase) {
+      try {
+        let validSenderId: string | null = null;
+        if (fromUserId && fromUserId.length >= 32) {
+          validSenderId = fromUserId;
+        } else {
+          const { data: sess } = await supabase.from('consultations').select('client_id, lawyer_id').eq('id', consultationId).maybeSingle();
+          if (sess) {
+            validSenderId = sess.client_id;
+          }
+        }
+
+        if (validSenderId) {
+          await supabase.from('consultation_messages').insert([{
+            id: crypto.randomUUID(),
+            consultation_id: consultationId,
+            sender_id: validSenderId,
+            sender_name: '__WEBRTC_SIGNAL__',
+            text: `__SIGNAL__:${JSON.stringify(newSignal)}`
+          }]);
+        }
+      } catch (err: any) {
+        console.warn("[Supabase Signal Persistence Warning]:", err?.message || err);
+      }
+    }
+
     res.status(201).json({ success: true, signal: newSignal });
   });
 
-  app.get("/api/consultations/signals/:consultationId/:userId", (req, res) => {
+  app.get("/api/consultations/signals/:consultationId/:userId", async (req, res) => {
     const { consultationId, userId } = req.params;
     const since = req.query.since as string;
+
+    // Check Supabase first for multi-lambda serverless support
+    if (supabase) {
+      try {
+        let query = supabase
+          .from('consultation_messages')
+          .select('*')
+          .eq('consultation_id', consultationId)
+          .like('text', '__SIGNAL__:%')
+          .order('created_at', { ascending: true });
+
+        if (since) {
+          query = query.gt('created_at', since);
+        }
+
+        const { data, error } = await query;
+        if (!error && data && data.length > 0) {
+          const dbSignals: WebRTCSignal[] = [];
+          for (const row of data) {
+            try {
+              const parsed = JSON.parse(row.text.substring(11));
+              if (parsed.fromUserId !== userId && (!parsed.toUserId || parsed.toUserId === userId)) {
+                dbSignals.push({
+                  id: row.id,
+                  consultationId: row.consultation_id,
+                  fromUserId: parsed.fromUserId,
+                  toUserId: parsed.toUserId,
+                  type: parsed.type,
+                  payload: parsed.payload,
+                  createdAt: row.created_at
+                });
+              }
+            } catch (pErr) {
+              // Ignore parse error
+            }
+          }
+          if (dbSignals.length > 0) {
+            return res.json({ signals: dbSignals });
+          }
+        }
+      } catch (err) {
+        // Fall back to in-memory signals
+      }
+    }
 
     let matches = signals.filter(s => 
       s.consultationId === consultationId && 
@@ -2479,12 +2551,17 @@ let users: User[] = [
 
     try {
       if (supabase) {
-        const { data, error } = await supabase.from('consultation_messages').select('*').eq('consultation_id', consultationId).order('created_at', { ascending: true });
+        const { data, error } = await supabase
+          .from('consultation_messages')
+          .select('*')
+          .eq('consultation_id', consultationId)
+          .not('text', 'like', '__SIGNAL__:%')
+          .order('created_at', { ascending: true });
         if (error) throw error;
         return res.json({ messages: (data || []).map(mapMessageToTS) });
       }
 
-      const msgs = consultationMessages.filter(m => m.consultationId === consultationId);
+      const msgs = consultationMessages.filter(m => m.consultationId === consultationId && !m.text.startsWith('__SIGNAL__:'));
       res.json({ messages: msgs });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

@@ -25,7 +25,7 @@ export interface WebRTCSignal {
   consultationId: string;
   fromUserId: string;
   toUserId?: string;
-  type: 'offer' | 'answer' | 'ice-candidate' | 'ready' | 'hangup';
+  type: 'offer' | 'answer' | 'ice-candidate' | 'ready' | 'hangup' | 'join' | 'request-offer' | 'ping';
   payload: any;
   createdAt: string;
 }

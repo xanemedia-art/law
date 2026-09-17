@@ -55,6 +55,9 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
   const processedSignalsRef = useRef<Set<string>>(new Set());
   const iceCandidatesQueueRef = useRef<RTCIceCandidateInit[]>([]);
   const lastSignalTimeRef = useRef<string>(new Date(Date.now() - 60000).toISOString());
+  const broadcastChannelRef = useRef<any>(null);
+  const isNegotiatingRef = useRef<boolean>(false);
+  const reconnectAttemptRef = useRef<number>(0);
 
   const isClient = currentUser?.role === 'client';
   const myUserId = currentUser?.id || '';
@@ -159,20 +162,23 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
     }
   };
 
+  const handleIncomingSignalRef = useRef<((sig: WebRTCSignal) => Promise<void>) | null>(null);
+
   const fetchMessages = async () => {
     if (!session) return;
     try {
       const res = await fetch('/api/consultations/messages/' + session.id);
       const data = await res.json();
       if (Array.isArray(data.messages)) {
+        const cleanMessages = data.messages.filter((m: ConsultationMessage) => !m.text.startsWith('__SIGNAL__:'));
         setMessages(prev => {
-          const hasNewFromPeer = data.messages.some(
+          const hasNewFromPeer = cleanMessages.some(
             (m: ConsultationMessage) => m.senderId !== myUserId && !prev.some(p => p.id === m.id)
           );
           if (hasNewFromPeer && prev.length > 0) {
             playMessageChime();
           }
-          return data.messages;
+          return cleanMessages;
         });
       }
     } catch (e) {
@@ -201,6 +207,25 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
           (payload: any) => {
             const row = payload.new;
             if (row) {
+              // Intercept WebRTC signals routed through consultation_messages table
+              if (row.text && row.text.startsWith('__SIGNAL__:')) {
+                try {
+                  const sigData = JSON.parse(row.text.substring(11));
+                  if (sigData && sigData.fromUserId !== myUserId) {
+                    handleIncomingSignalRef.current?.({
+                      id: row.id,
+                      consultationId: row.consultation_id,
+                      fromUserId: sigData.fromUserId,
+                      toUserId: sigData.toUserId,
+                      type: sigData.type,
+                      payload: sigData.payload,
+                      createdAt: row.created_at
+                    });
+                  }
+                } catch (e) {}
+                return;
+              }
+
               const newMsg: ConsultationMessage = {
                 id: row.id,
                 consultationId: row.consultation_id,
@@ -313,12 +338,21 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
       ctx.fillStyle = '#94a3b8';
       ctx.font = '11px monospace';
       ctx.fillText('Testing Mode (Hardware camera shared across tabs)', 320, 345);
-
-      requestAnimationFrame(draw);
     };
-    draw();
 
-    const stream = canvas.captureStream(25);
+    draw();
+    // Use steady 50ms (20 FPS) interval so background tabs do not throttle/freeze video generation
+    const timerId = setInterval(draw, 50);
+
+    const stream = canvas.captureStream(20);
+
+    stream.getVideoTracks().forEach(t => {
+      const origStop = t.stop.bind(t);
+      t.stop = () => {
+        clearInterval(timerId);
+        origStop();
+      };
+    });
 
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -340,31 +374,34 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
     return stream;
   }, []);
 
-  // Send signaling packet (via HTTP + Supabase broadcast)
+  // Send signaling packet (via Supabase broadcast channel + HTTP database-backed fallback)
   const sendSignal = useCallback(async (type: WebRTCSignal['type'], payload: any) => {
     if (!session || !currentUser) return;
     const partnerId = isClient ? session.lawyerId : session.clientId;
+    const signalPacket = {
+      id: `sig-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      consultationId: session.id,
+      fromUserId: currentUser.id,
+      toUserId: partnerId,
+      type,
+      payload,
+      createdAt: new Date().toISOString()
+    };
 
+    // 1. Supabase Realtime broadcast (low latency sub-50ms)
     try {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        const channel = supabase.channel('webrtc:' + session.id);
-        channel.send({
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.send({
           type: 'broadcast',
           event: 'signal',
-          payload: {
-            consultationId: session.id,
-            fromUserId: currentUser.id,
-            toUserId: partnerId,
-            type,
-            payload
-          }
+          payload: signalPacket
         });
       }
     } catch (err) {
       // Supabase broadcast failure fallback
     }
 
+    // 2. HTTP POST fallback (persisted in DB/memory across Vercel lambdas)
     try {
       await fetch('/api/consultations/signal', {
         method: 'POST',
@@ -382,6 +419,118 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
     }
   }, [session, currentUser, isClient]);
 
+  // Create offer and send with renegotiation protection
+  const createOfferAndSend = useCallback(async (iceRestart = false) => {
+    const pc = pcRef.current;
+    if (!pc || pc.signalingState === 'closed') return;
+    if (isNegotiatingRef.current) {
+      console.log('[WebRTC] Negotiation already in progress, skipping duplicate offer');
+      return;
+    }
+
+    try {
+      isNegotiatingRef.current = true;
+      console.log(`[WebRTC] Creating offer (iceRestart: ${iceRestart})...`);
+      const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : {});
+      await pc.setLocalDescription(offer);
+      await sendSignal('offer', offer);
+      console.log('[WebRTC] Offer dispatched to peer');
+    } catch (err) {
+      console.error('[WebRTC] Error creating offer:', err);
+    } finally {
+      isNegotiatingRef.current = false;
+    }
+  }, [sendSignal]);
+
+  // -------------------------------------------------------------
+  // 4. SIGNAL CONSUMER (HTTP POLLING + SUPABASE BROADCAST + REALTIME TABLE)
+  // -------------------------------------------------------------
+  const handleIncomingSignal = useCallback(async (sig: WebRTCSignal) => {
+    const pc = pcRef.current;
+    if (!pc || !sig || !sig.type || sig.fromUserId === myUserId) return;
+    if (sig.toUserId && sig.toUserId !== myUserId) return;
+
+    if (processedSignalsRef.current.has(sig.id)) return;
+    processedSignalsRef.current.add(sig.id);
+
+    console.log(`[WebRTC Signal Received] type=${sig.type} from=${sig.fromUserId}`);
+
+    try {
+      if (sig.type === 'join' || sig.type === 'request-offer') {
+        if (isClient) {
+          console.log('[WebRTC] Peer requested offer, initiating offer generation...');
+          await createOfferAndSend(true);
+        } else {
+          await sendSignal('ready', {});
+        }
+      } else if (sig.type === 'ready') {
+        if (isClient) {
+          await createOfferAndSend(false);
+        }
+      } else if (sig.type === 'offer') {
+        if (!isClient) {
+          if (pc.signalingState !== 'stable') {
+            console.log('[WebRTC] Rolling back local description to accept remote offer (glare resolution)');
+            await Promise.all([
+              pc.setLocalDescription({ type: 'rollback' }),
+              pc.setRemoteDescription(new RTCSessionDescription(sig.payload))
+            ]);
+          } else {
+            await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
+          }
+
+          while (iceCandidatesQueueRef.current.length > 0) {
+            const cand = iceCandidatesQueueRef.current.shift();
+            if (cand) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {
+                console.warn('[WebRTC] Error adding queued candidate:', e);
+              }
+            }
+          }
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await sendSignal('answer', answer);
+          console.log('[WebRTC] Answer created and sent to client');
+        }
+      } else if (sig.type === 'answer') {
+        if (isClient && pc.signalingState === 'have-local-offer') {
+          await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
+          console.log('[WebRTC] Remote description set from answer, draining queued candidates');
+          while (iceCandidatesQueueRef.current.length > 0) {
+            const cand = iceCandidatesQueueRef.current.shift();
+            if (cand) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(cand));
+              } catch (e) {
+                console.warn('[WebRTC] Error adding queued candidate:', e);
+              }
+            }
+          }
+        }
+      } else if (sig.type === 'ice-candidate' && sig.payload) {
+        if (pc.remoteDescription && pc.remoteDescription.type) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(sig.payload));
+          } catch (candErr) {
+            console.warn('[WebRTC] Error adding ICE candidate:', candErr);
+          }
+        } else {
+          iceCandidatesQueueRef.current.push(sig.payload);
+        }
+      }
+    } catch (sigErr) {
+      console.error('[WebRTC] Error handling WebRTC signal:', sigErr);
+    }
+  }, [myUserId, isClient, createOfferAndSend, sendSignal]);
+
+  // Keep ref up to date for the Realtime message table interceptor
+  useEffect(() => {
+    handleIncomingSignalRef.current = handleIncomingSignal;
+  }, [handleIncomingSignal]);
+
   // Initialize WebRTC
   useEffect(() => {
     if (!session || session.type === 'chat') {
@@ -391,6 +540,7 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
 
     let isMounted = true;
     const isVideoMode = session.type === 'video';
+    let handshakeInterval: any = null;
 
     const initWebRTC = async () => {
       try {
@@ -435,14 +585,15 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
         });
 
         pc.ontrack = (event) => {
-          const [remoteStream] = event.streams;
+          console.log('[WebRTC] Received remote track:', event.track.kind);
+          const remoteStream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
           if (isVideoMode && remoteVideoRef.current) {
             remoteVideoRef.current.srcObject = remoteStream;
-            remoteVideoRef.current.play().catch(() => {});
+            remoteVideoRef.current.play().catch(e => console.warn('Video play error:', e));
           }
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = remoteStream;
-            remoteAudioRef.current.play().catch(() => {});
+            remoteAudioRef.current.play().catch(e => console.warn('Audio play error:', e));
           }
           setCallStatus('connected');
         };
@@ -453,8 +604,25 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
           }
         };
 
+        pc.oniceconnectionstatechange = () => {
+          if (!isMounted) return;
+          console.log('[WebRTC] ICE Connection State:', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+            setCallStatus('connected');
+          } else if (pc.iceConnectionState === 'failed') {
+            console.warn('[WebRTC] ICE state failed, attempting renegotiation');
+            setCallStatus('reconnecting');
+            if (isClient) {
+              createOfferAndSend(true);
+            }
+          } else if (pc.iceConnectionState === 'disconnected') {
+            setCallStatus('reconnecting');
+          }
+        };
+
         pc.onconnectionstatechange = () => {
           if (!isMounted) return;
+          console.log('[WebRTC] Connection State:', pc.connectionState);
           if (pc.connectionState === 'connected') {
             setCallStatus('connected');
           } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
@@ -462,11 +630,33 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
           }
         };
 
+        // Handshake initiation
         if (isClient) {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          sendSignal('offer', offer);
+          await createOfferAndSend(false);
+        } else {
+          await sendSignal('join', {});
         }
+
+        // Periodic handshake pulse if not yet connected
+        let pulseCount = 0;
+        handshakeInterval = setInterval(() => {
+          if (!isMounted) return;
+          if (pc.iceConnectionState === 'connected' || pc.connectionState === 'connected') {
+            clearInterval(handshakeInterval);
+            return;
+          }
+          pulseCount++;
+          if (pulseCount > 10) {
+            clearInterval(handshakeInterval);
+            return;
+          }
+          console.log(`[WebRTC Handshake Pulse ${pulseCount}/10] Pinging peer...`);
+          if (isClient) {
+            createOfferAndSend(false);
+          } else {
+            sendSignal('join', {});
+          }
+        }, 3500);
 
       } catch (err: any) {
         console.error('Failed to initialize WebRTC engine:', err);
@@ -478,6 +668,7 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
 
     return () => {
       isMounted = false;
+      if (handshakeInterval) clearInterval(handshakeInterval);
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
       }
@@ -485,44 +676,9 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
         pcRef.current.close();
       }
     };
-  }, [session?.id, session?.type, isClient]);
+  }, [session?.id, session?.type, isClient, createSyntheticMedia, createOfferAndSend, sendSignal]);
 
-  // -------------------------------------------------------------
-  // 4. SIGNAL CONSUMER (HTTP POLLING + SUPABASE BROADCAST)
-  // -------------------------------------------------------------
-  const handleIncomingSignal = useCallback(async (sig: WebRTCSignal) => {
-    const pc = pcRef.current;
-    if (!pc || !sig || processedSignalsRef.current.has(sig.id)) return;
-    processedSignalsRef.current.add(sig.id);
-
-    try {
-      if (sig.type === 'offer' && !isClient) {
-        await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
-        while (iceCandidatesQueueRef.current.length > 0) {
-          const cand = iceCandidatesQueueRef.current.shift();
-          if (cand) await pc.addIceCandidate(new RTCIceCandidate(cand));
-        }
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        sendSignal('answer', answer);
-      } else if (sig.type === 'answer' && isClient) {
-        await pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
-        while (iceCandidatesQueueRef.current.length > 0) {
-          const cand = iceCandidatesQueueRef.current.shift();
-          if (cand) await pc.addIceCandidate(new RTCIceCandidate(cand));
-        }
-      } else if (sig.type === 'ice-candidate' && sig.payload) {
-        if (pc.remoteDescription && pc.remoteDescription.type) {
-          await pc.addIceCandidate(new RTCIceCandidate(sig.payload));
-        } else {
-          iceCandidatesQueueRef.current.push(sig.payload);
-        }
-      }
-    } catch (sigErr) {
-      console.error('Error handling WebRTC signal:', sigErr);
-    }
-  }, [isClient, sendSignal]);
-
+  // Supabase Broadcast Channel + HTTP Polling Fallback
   useEffect(() => {
     if (!session || session.type === 'chat') return;
 
@@ -538,7 +694,14 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
             handleIncomingSignal(sig);
           }
         })
-        .subscribe();
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
+            broadcastChannelRef.current = channel;
+            if (!isClient) {
+              sendSignal('join', {});
+            }
+          }
+        });
     }
 
     const signalInterval = setInterval(async () => {
@@ -565,9 +728,10 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
       clearInterval(signalInterval);
       if (channel && supabase) {
         supabase.removeChannel(channel);
+        broadcastChannelRef.current = null;
       }
     };
-  }, [session, myUserId, handleIncomingSignal]);
+  }, [session, myUserId, isClient, handleIncomingSignal, sendSignal]);
 
   const toggleMute = () => {
     if (!localStreamRef.current) return;
@@ -724,8 +888,27 @@ export default function ActiveSession({ currentUser, theme, onToggleTheme }: Act
               }`}>
                 {callStatus === 'connected' ? '● PEER CONNECTED' : '○ CONNECTING PEER...'}
               </span>
+              {callStatus !== 'connected' && session.type !== 'chat' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log('[WebRTC] Manual retry handshake triggered');
+                    if (isClient) {
+                      createOfferAndSend(true);
+                    } else {
+                      sendSignal('join', {});
+                    }
+                  }}
+                  className="text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-2 py-0.5 rounded cursor-pointer transition-all shadow-xs"
+                >
+                  Retry Handshake
+                </button>
+              )}
             </div>
           </div>
+
+          {/* Hidden audio element ensures peer audio streams play reliably across voice & video modes */}
+          <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
           {mediaError && (
             <div className="mt-3 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-[11px] text-amber-300 flex items-center gap-2">
