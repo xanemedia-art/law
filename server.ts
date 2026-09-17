@@ -383,7 +383,6 @@ let users: User[] = [
     if (c.totalCost !== undefined) row.total_cost = c.totalCost;
     if (c.lawyerReceipt !== undefined) row.lawyer_receipt = c.lawyerReceipt;
     if (c.platformCommission !== undefined) row.platform_commission = c.platformCommission;
-    if (c.agoraChannelName !== undefined) row.agora_channel_name = c.agoraChannelName;
     return row;
   }
 
@@ -1876,29 +1875,59 @@ let users: User[] = [
           }
         }
 
+        const insertPayload: any = {
+          client_id: clientId,
+          client_name: client.name,
+          lawyer_id: lawyerId,
+          lawyer_name: lawyerUser.name,
+          type,
+          status: 'active',
+          rate_per_minute: ratePerMinute,
+          started_at: new Date().toISOString()
+        };
+
         const { data: session, error: sErr } = await supabase
           .from('consultations')
-          .insert([{
-            client_id: clientId,
-            client_name: client.name,
-            lawyer_id: lawyerId,
-            lawyer_name: lawyerUser.name,
-            type,
-            status: 'active',
-            rate_per_minute: ratePerMinute,
-            agora_channel_name: `channel_${type}_${clientId}_${Date.now()}`,
-            started_at: new Date().toISOString()
-          }])
+          .insert([insertPayload])
           .select()
           .single();
-        if (sErr) throw sErr;
 
-        await supabase.from('consultation_messages').insert([{
-          consultation_id: session.id,
-          sender_id: lawyerId,
-          sender_name: lawyerUser.name,
-          text: `Hello ${client.name}! Thanks for connecting. How can I assist you with ${lawyer.categories[0] || 'your legal case'} today?`
-        }]);
+        if (sErr || !session) {
+          console.warn("[Supabase Consultation Insert Warning]:", sErr?.message || sErr, "- Falling back to local session creation.");
+          const fallbackSession: Consultation = {
+            id: `c-${Date.now()}`,
+            clientId,
+            clientName: client.name,
+            lawyerId,
+            lawyerName: lawyerUser.name,
+            type,
+            status: 'active',
+            ratePerMinute,
+            startedAt: new Date().toISOString()
+          };
+          consultations.push(fallbackSession);
+          consultationMessages.push({
+            id: `msg-${Date.now()}`,
+            consultationId: fallbackSession.id,
+            senderId: lawyerId,
+            senderName: lawyerUser.name,
+            text: `Hello ${client.name}! Thanks for connecting. How can I assist you with ${lawyer.categories?.[0] || 'your legal case'} today?`,
+            timestamp: new Date().toISOString()
+          });
+          saveLocalDb();
+          return res.status(201).json({ session: fallbackSession });
+        }
+
+        try {
+          await supabase.from('consultation_messages').insert([{
+            consultation_id: session.id,
+            sender_id: lawyerId,
+            sender_name: lawyerUser.name,
+            text: `Hello ${client.name}! Thanks for connecting. How can I assist you with ${lawyer.categories?.[0] || 'your legal case'} today?`
+          }]);
+        } catch (msgErr) {
+          console.warn("[Initial Message Warning]:", msgErr);
+        }
 
         // Trigger push alert to lawyer device
         if (lawyerUser && lawyerUser.fcm_token) {
