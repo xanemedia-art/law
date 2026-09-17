@@ -198,7 +198,7 @@ export default function ActiveSession({ session, currentUser, onSessionEnded }: 
               </div>
               <div>
                 <strong className="block text-slate-100">Audio Voice Conversation Active</strong>
-                <span className="block text-xs text-slate-400 mt-1">Speaker, Microphone & Agora dynamic channels initialized.</span>
+                <span className="block text-xs text-slate-400 mt-1">Speaker, Microphone & Google STUN WebRTC P2P channel initialized.</span>
               </div>
               <div className="flex gap-1.5 items-center justify-center">
                 {[1, 2, 3, 4, 5, 4, 3, 2, 1].map((bar, i) => (

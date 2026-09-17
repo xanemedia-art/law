@@ -18,10 +18,10 @@ Make sure to add the following key parameters from your database and gateways in
 - `NEXT_PUBLIC_SUPABASE_URL`: Endpoint of your Supabase project.
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase client-accessible key.
 - `SUPABASE_SERVICE_ROLE_KEY`: Supabase server-exclusive key.
-- `RAZORPAY_KEY_ID`: Client key of Razorpay account.
+- `RAZORPAY_KEY_ID`: Client key of Razorpay account (or test mode).
 - `RAZORPAY_KEY_SECRET`: Server secret of Razorpay account.
-- `AGORA_APP_ID`: Application client id for Agora communication web interface.
 - `APP_URL`: Set to standard deployment canonical domain (e.g. `https://legaltalkindia.vercel.app`).
+*(Note: Video and voice calling uses Native WebRTC via free Google STUN servers with ₹0 ongoing cost - no external paid video gateway needed!)*
 
 ## 4. Launch Build and Deploy
 1. Keep default framework overrides (`Next.js` or `Vite` depending on your wrapper framework).

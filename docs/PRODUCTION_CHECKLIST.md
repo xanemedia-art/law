@@ -14,7 +14,7 @@ Verify these crucial system and infrastructure security parameters before going 
 - [ ] **Continuous log stream**: Record audit lines for critical administrator actions such as blocking users, approving lawyers, or modifying database schemas.
 
 ## 3. Communication & Feeds
-- [ ] **RTC token authentication**: Set up Agora dynamic dynamic authentication token channels on `/api/agora/token` so that client/lawyer audio and video streams require authenticated sessions.
+- [ ] **Native WebRTC (Google STUN)**: Verify RTCPeerConnection establishes direct P2P connections using free Google STUN (`stun:stun.l.google.com:19302`) with zero per-minute server charges.
 - [ ] **Online switch lifecycle**: Enable client cleanup triggers so that if a lawyer disconnects or closes their browser, their availability status is set to `is_online = false`.
 - [ ] **Email alerts**: Configure direct mail SMTP integrations to alert lawyers when consultation requests are received.
 

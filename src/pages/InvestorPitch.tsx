@@ -81,7 +81,7 @@ const SLIDES = [
       },
       {
         rule: 'Data Security & NDA Protocols',
-        desc: 'Agora video/audio channels are end-to-end encrypted. Document uploads are stored in secure, access-controlled vaults.'
+        desc: 'Native WebRTC video/audio peer channels (via Google Public STUN) are end-to-end encrypted with zero per-minute server costs. Document uploads are stored in secure, access-controlled vaults.'
       }
     ],
     accent: 'from-amber-600 to-yellow-600'
@@ -989,7 +989,7 @@ export default function InvestorPitch({ theme, onToggleTheme }: { theme: 'light'
                         </div>
 
                         <div className="text-[9px] text-slate-400 pt-2 border-t border-slate-100 font-medium">
-                          Agora RTC web hooks are registered to trigger database billing updates dynamically upon session status changes.
+                          Native WebRTC P2P channels with Google Public STUN and Supabase Realtime trigger dynamic billing updates upon session state changes.
                         </div>
                       </div>
 
