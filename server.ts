@@ -1876,6 +1876,7 @@ let users: User[] = [
         }
 
         const insertPayload: any = {
+          id: crypto.randomUUID(),
           client_id: clientId,
           client_name: client.name,
           lawyer_id: lawyerId,
@@ -1920,6 +1921,7 @@ let users: User[] = [
 
         try {
           await supabase.from('consultation_messages').insert([{
+            id: crypto.randomUUID(),
             consultation_id: session.id,
             sender_id: lawyerId,
             sender_name: lawyerUser.name,
@@ -2423,52 +2425,58 @@ let users: User[] = [
 
     try {
       if (supabase) {
-        const { data, error } = await supabase
-          .from('consultation_messages')
-          .insert([{
-            consultation_id: consultationId,
-            sender_id: senderId,
-            sender_name: senderName,
-            text
-          }])
-          .select()
-          .single();
-        if (error) throw error;
-
-        // Push message alert to chat partner
-        (async () => {
-          try {
-            const { data: session } = await supabase
-              .from('consultations')
-              .select('*')
-              .eq('id', consultationId)
-              .maybeSingle();
-            if (session) {
-              const partnerId = senderId === session.client_id ? session.lawyer_id : session.client_id;
-              const { data: partnerUser } = await supabase
-                .from('users')
-                .select('*')
-                .eq('id', partnerId)
-                .maybeSingle();
-              if (partnerUser && partnerUser.fcm_token) {
-                sendPushNotification(
-                  partnerUser.fcm_token,
-                  `New message from ${senderName}`,
-                  text.length > 50 ? text.substring(0, 50) + "..." : text,
-                  {
-                    type: "new_message",
-                    consultationId,
-                    senderName
+        try {
+          const { data, error } = await supabase
+            .from('consultation_messages')
+            .insert([{
+              id: crypto.randomUUID(),
+              consultation_id: consultationId,
+              sender_id: senderId,
+              sender_name: senderName,
+              text
+            }])
+            .select()
+            .single();
+          if (!error && data) {
+            // Push message alert to chat partner
+            (async () => {
+              try {
+                const { data: session } = await supabase
+                  .from('consultations')
+                  .select('*')
+                  .eq('id', consultationId)
+                  .maybeSingle();
+                if (session) {
+                  const partnerId = senderId === session.client_id ? session.lawyer_id : session.client_id;
+                  const { data: partnerUser } = await supabase
+                    .from('users')
+                    .select('*')
+                    .eq('id', partnerId)
+                    .maybeSingle();
+                  if (partnerUser && partnerUser.fcm_token) {
+                    sendPushNotification(
+                      partnerUser.fcm_token,
+                      `New Message from ${senderName}`,
+                      text.length > 80 ? text.substring(0, 77) + "..." : text,
+                      {
+                        type: "chat_message",
+                        consultationId,
+                        senderId,
+                        senderName
+                      }
+                    );
                   }
-                );
+                }
+              } catch (pushErr) {
+                // Ignore push failures
               }
-            }
-          } catch (e: any) {
-            console.error("[FCM Push Message] Error sending notification:", e.message);
-          }
-        })();
+            })();
 
-        return res.status(201).json({ message: mapMessageToTS(data) });
+            return res.status(201).json({ message: mapMessageToTS(data) });
+          }
+        } catch (subErr) {
+          console.warn("[Supabase Message Insert Warning]:", subErr);
+        }
       }
 
       const newMsg: ConsultationMessage = {
