@@ -25,3 +25,7 @@ local.properties
 *.rar
 *.tar.gz
 *.tar
+
+# Temporary scratch files
+scratch/
+

@@ -15,12 +15,32 @@ export interface User {
   freeCallMinutesRemaining?: number;
   freeChatsRemaining?: number;
   fcmToken?: string;
+  password?: string;
+  passwordHash?: string;
+  token?: string;
+}
+
+export interface WebRTCSignal {
+  id: string;
+  consultationId: string;
+  fromUserId: string;
+  toUserId?: string;
+  type: 'offer' | 'answer' | 'ice-candidate' | 'ready' | 'hangup';
+  payload: any;
+  createdAt: string;
 }
 
 export type VerificationStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
 
 export interface LawyerProfile {
+  id?: string;
   userId: string;
+  fullName?: string;
+  name?: string;
+  email?: string;
+  mobile?: string;
+  avatarUrl?: string;
+  isBlocked?: boolean;
   barCouncilNumber: string;
   stateBarCouncil: string;
   aadhaar: string;

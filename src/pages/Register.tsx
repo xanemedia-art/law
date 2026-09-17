@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Scale, Users, Award, Mail, Phone, User as UserIcon, MapPin, Globe, ShieldAlert, RefreshCw, Sun, Moon } from 'lucide-react';
+import { Scale, Users, Award, Mail, Phone, User as UserIcon, MapPin, Globe, ShieldAlert, RefreshCw, Sun, Moon, Lock } from 'lucide-react';
 import { STATE_DISTRICTS } from '../types';
 
 const STATE_BAR_COUNCILS = [
@@ -55,6 +55,8 @@ export default function Register({ onRegisterSuccess, theme, onToggleTheme }: Re
   const [mobile, setMobile] = useState('');
   const [city, setCity] = useState('');
   const [language, setLanguage] = useState('English');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [invitationCode, setInvitationCode] = useState('');
 
   // OTP simulation flow
@@ -98,6 +100,16 @@ export default function Register({ onRegisterSuccess, theme, onToggleTheme }: Re
       return;
     }
 
+    if (!password || password.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match. Please re-enter.');
+      return;
+    }
+
     if (role === 'admin' && !invitationCode) {
       setError('An admin invitation code is required.');
       return;
@@ -130,7 +142,8 @@ export default function Register({ onRegisterSuccess, theme, onToggleTheme }: Re
             mobile,
             role: 'client',
             city,
-            language
+            language,
+            password
           })
         });
         const data = await res.json();
@@ -151,7 +164,8 @@ export default function Register({ onRegisterSuccess, theme, onToggleTheme }: Re
             mobile,
             role: 'admin',
             city,
-            invitationCode
+            invitationCode,
+            password
           })
         });
         const data = await res.json();
@@ -176,6 +190,7 @@ export default function Register({ onRegisterSuccess, theme, onToggleTheme }: Re
             fullName,
             email,
             mobile,
+            password,
             barCouncilNumber: barNumber,
             stateBarCouncil: stateBar,
             aadhaar: 'Pending',
@@ -478,6 +493,38 @@ export default function Register({ onRegisterSuccess, theme, onToggleTheme }: Re
                     )}
                   </>
                 )}
+              </div>
+
+              {/* SECURITY PASSWORD INPUTS */}
+              <div className="grid sm:grid-cols-2 gap-4 text-left">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Create Password</label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-3.5 text-slate-400"><Lock className="w-4.5 h-4.5" /></span>
+                    <input 
+                      type="password" 
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Minimum 6 characters"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-3.5 text-xs focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all text-slate-800 dark:text-white font-medium" 
+                      required 
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Confirm Password</label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-3.5 text-slate-400"><Lock className="w-4.5 h-4.5" /></span>
+                    <input 
+                      type="password" 
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter password"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-3.5 text-xs focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all text-slate-800 dark:text-white font-medium" 
+                      required 
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* DYNAMIC LAWYER/CLIENT SPECIFIC SECTIONS */}

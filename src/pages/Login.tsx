@@ -22,7 +22,7 @@ export default function Login({ allUsers, onLogin, theme, onToggleTheme }: Login
 
   const filteredUsers = allUsers.filter(u => u.role === role);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     
@@ -31,36 +31,73 @@ export default function Login({ allUsers, onLogin, theme, onToggleTheme }: Login
       return;
     }
 
-    setLoading(true);
-    setTimeout(() => {
-      const found = allUsers.find(u => u.email.toLowerCase() === email.toLowerCase() && u.role === role);
-      if (found) {
-        if (found.isBlocked) {
-          setError('This account has been blocked by system administrators.');
-          setLoading(false);
-          return;
-        }
-        onLogin(found);
-        setLoading(false);
-        if (found.role === 'client') navigate('/client');
-        else if (found.role === 'lawyer') navigate('/lawyer');
-        else if (found.role === 'admin') navigate('/hidden-admin-portal');
-      } else {
-        setError(`No registered ${role} account found with that email in this sandbox.`);
-        setLoading(false);
-      }
-    }, 500);
-  };
-
-  const handleQuickLogin = (user: User) => {
-    if (user.isBlocked) {
-      setError('This account has been blocked by system administrators.');
+    if (!password) {
+      setError('Password is required.');
       return;
     }
-    onLogin(user);
-    if (user.role === 'client') navigate('/client');
-    else if (user.role === 'lawyer') navigate('/lawyer');
-    else if (user.role === 'admin') navigate('/hidden-admin-portal');
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password, role })
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        setError(data.error || 'Authentication failed. Please check credentials.');
+        setLoading(false);
+        return;
+      }
+
+      if (data.user) {
+        onLogin(data.user);
+        if (data.user.role === 'client') navigate('/client');
+        else if (data.user.role === 'lawyer') navigate('/lawyer');
+        else if (data.user.role === 'admin') navigate('/hidden-admin-portal');
+      }
+    } catch (err: any) {
+      setError('Authentication server error: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleQuickLogin = async (user: User) => {
+    setError('');
+    const defaultPassword = user.role === 'admin' ? 'admin123' : 'password123';
+    setEmail(user.email);
+    setPassword(defaultPassword);
+    setRole(user.role);
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email, password: defaultPassword, role: user.role })
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        // If password changed, just pre-fill email
+        setError(data.error || 'Please enter this account password.');
+        setLoading(false);
+        return;
+      }
+
+      if (data.user) {
+        onLogin(data.user);
+        if (data.user.role === 'client') navigate('/client');
+        else if (data.user.role === 'lawyer') navigate('/lawyer');
+        else if (data.user.role === 'admin') navigate('/hidden-admin-portal');
+      }
+    } catch (err: any) {
+      setError('Login failed: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -185,8 +222,9 @@ export default function Login({ allUsers, onLogin, theme, onToggleTheme }: Login
                     type="password" 
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Enter password (any value for testing)"
+                    placeholder="Enter your account password"
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-2xl pl-10 pr-4 py-3.5 text-xs focus:outline-none focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 transition-all text-slate-800 dark:text-white font-medium" 
+                    required 
                   />
                 </div>
               </div>

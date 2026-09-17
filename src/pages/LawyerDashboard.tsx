@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Scale, Award, ShieldAlert, DollarSign, Wallet, Star, ArrowLeft, RefreshCw, Send, CheckCircle2, History, Sun, Moon, LogOut, LayoutDashboard, Compass, Calendar, Plus, FolderOpen, Upload, FileText, ShieldCheck } from 'lucide-react';
+import { Scale, Award, ShieldAlert, DollarSign, Wallet, Star, ArrowLeft, RefreshCw, Send, CheckCircle2, History, Sun, Moon, LogOut, LayoutDashboard, Compass, Calendar, Plus, FolderOpen, Upload, FileText, ShieldCheck, Video as VideoIcon, PhoneCall, MessageSquare } from 'lucide-react';
 import { User, LawyerProfile, Consultation, STATE_DISTRICTS, Case } from '../types';
+import { getSupabaseClient } from '../lib/supabase';
 
 
 const STATE_BAR_COUNCILS = [
@@ -124,6 +125,8 @@ export default function LawyerDashboard({ currentUser, theme, onToggleTheme }: L
   const [lawyerWallet, setLawyerWallet] = useState<number>(0);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [consultations, setConsultations] = useState<Consultation[]>([]);
+  const [incomingSession, setIncomingSession] = useState<Consultation | null>(null);
+  const [dismissedSessionIds, setDismissedSessionIds] = useState<Set<string>>(new Set());
 
   // Case states
   const [cases, setCases] = useState<Case[]>([]);
@@ -196,7 +199,20 @@ export default function LawyerDashboard({ currentUser, theme, onToggleTheme }: L
 
       const resHist = await fetch(`/api/consultations/history/${currentUser.id}`);
       const dataHist = await resHist.json();
-      setConsultations(dataHist.consultations || []);
+      const list: Consultation[] = dataHist.consultations || [];
+      setConsultations(list);
+
+      const active = list.find(c => c.status === 'active' && !dismissedSessionIds.has(c.id));
+      if (active) {
+        setIncomingSession(active);
+      } else {
+        setIncomingSession(prev => {
+          if (prev && !list.some(c => c.id === prev.id && c.status === 'active')) {
+            return null;
+          }
+          return prev;
+        });
+      }
     } catch (e) {
       console.error(e);
     }
@@ -224,7 +240,38 @@ export default function LawyerDashboard({ currentUser, theme, onToggleTheme }: L
     fetchProfile();
     fetchWalletAndHistory();
     fetchCases();
-  }, [currentUser]);
+
+    const interval = setInterval(() => {
+      fetchWalletAndHistory();
+    }, 3000);
+
+    const supabase = getSupabaseClient();
+    let channel: any = null;
+    if (supabase) {
+      channel = supabase
+        .channel('lawyer_consultations:' + currentUser.id)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'consultations',
+            filter: 'lawyer_id=eq.' + currentUser.id
+          },
+          () => {
+            fetchWalletAndHistory();
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [currentUser, dismissedSessionIds]);
 
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -657,6 +704,68 @@ export default function LawyerDashboard({ currentUser, theme, onToggleTheme }: L
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </button>
         </div>
+
+        {/* INCOMING CONSULTATION CALL BANNER */}
+        <AnimatePresence>
+          {incomingSession && (
+            <motion.div
+              initial={{ opacity: 0, y: -20, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -20, scale: 0.98 }}
+              className="bg-gradient-to-r from-indigo-900 via-indigo-950 to-slate-900 border-2 border-indigo-500 rounded-3xl p-6 text-white shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+                <PhoneCall className="w-32 h-32 text-indigo-400" />
+              </div>
+              <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300 animate-pulse shrink-0">
+                    {incomingSession.type === 'video' ? (
+                      <VideoIcon className="w-7 h-7 text-emerald-400" />
+                    ) : incomingSession.type === 'voice' ? (
+                      <PhoneCall className="w-7 h-7 text-indigo-400" />
+                    ) : (
+                      <MessageSquare className="w-7 h-7 text-cyan-400" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                      <span className="text-[11px] font-mono uppercase tracking-widest text-emerald-400 font-bold">
+                        Incoming {incomingSession.type.toUpperCase()} Consultation Call
+                      </span>
+                    </div>
+                    <h3 className="text-xl font-display font-extrabold text-white mt-1">
+                      {incomingSession.clientName} is requesting a consultation
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-0.5 font-mono">
+                      Rate: ₹{incomingSession.ratePerMinute}/minute &bull; Room: {incomingSession.id}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <button
+                    onClick={() => {
+                      setDismissedSessionIds(prev => new Set(prev).add(incomingSession.id));
+                      setIncomingSession(null);
+                    }}
+                    className="flex-1 md:flex-none px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={() => navigate(`/session/${incomingSession.id}`)}
+                    className="flex-1 md:flex-none px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-extrabold text-xs transition-all shadow-lg hover:shadow-emerald-500/20 cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Join Consultation Room</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {registrationMode ? (
           <div className="max-w-3xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-805 p-8 space-y-6">

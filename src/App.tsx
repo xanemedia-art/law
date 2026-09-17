@@ -14,6 +14,7 @@ import AIAssistant from './components/AIAssistant';
 import InvestorPitch from './pages/InvestorPitch';
 import { User } from './types';
 import { RefreshCw } from 'lucide-react';
+import { fetchServerConfig } from './lib/supabase';
 
 const pageVariants = {
   initial: { opacity: 0, y: 15 },
@@ -120,38 +121,50 @@ function AppRoutes({
         <Route 
           path="/client" 
           element={
-            <PageWrapper>
-              <ClientDashboard 
-                currentUser={currentUser} 
-                onInitiateSession={onInitiateSession} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
+            currentUser ? (
+              <PageWrapper>
+                <ClientDashboard 
+                  currentUser={currentUser} 
+                  onInitiateSession={onInitiateSession} 
+                  theme={theme}
+                  onToggleTheme={onToggleTheme}
+                />
+              </PageWrapper>
+            ) : (
+              <Navigate to="/login" replace />
+            )
           } 
         />
         <Route 
           path="/lawyer" 
           element={
-            <PageWrapper>
-              <LawyerDashboard 
-                currentUser={currentUser} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
+            currentUser ? (
+              <PageWrapper>
+                <LawyerDashboard 
+                  currentUser={currentUser} 
+                  theme={theme}
+                  onToggleTheme={onToggleTheme}
+                />
+              </PageWrapper>
+            ) : (
+              <Navigate to="/login" replace />
+            )
           } 
         />
         <Route 
           path="/hidden-admin-portal" 
           element={
-            <PageWrapper>
-              <AdminDashboard 
-                currentUser={currentUser} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
+            currentUser ? (
+              <PageWrapper>
+                <AdminDashboard 
+                  currentUser={currentUser} 
+                  theme={theme}
+                  onToggleTheme={onToggleTheme}
+                />
+              </PageWrapper>
+            ) : (
+              <Navigate to="/login" replace />
+            )
           } 
         />
         <Route 
@@ -165,13 +178,17 @@ function AppRoutes({
         <Route 
           path="/session/:id" 
           element={
-            <PageWrapper>
-              <ActiveSession 
-                currentUser={currentUser} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
+            currentUser ? (
+              <PageWrapper>
+                <ActiveSession 
+                  currentUser={currentUser} 
+                  theme={theme}
+                  onToggleTheme={onToggleTheme}
+                />
+              </PageWrapper>
+            ) : (
+              <Navigate to="/login" replace />
+            )
           } 
         />
         <Route 
@@ -228,6 +245,7 @@ export default function App() {
 
   const fetchInitialContext = async () => {
     try {
+      await fetchServerConfig();
       const res = await fetch("/api/auth/current");
       const data = await res.json();
       const usersList = data.users || [];
@@ -242,9 +260,8 @@ export default function App() {
         } else {
           setCurrentUser(parsed);
         }
-      } else if (usersList.length > 0) {
-        setCurrentUser(usersList[0]);
-        localStorage.setItem("currentUser", JSON.stringify(usersList[0]));
+      } else {
+        setCurrentUser(null);
       }
     } catch (e) {
       console.error("Context fetch failed:", e);
