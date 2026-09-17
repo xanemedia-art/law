@@ -59,10 +59,9 @@ app.use((req, res, next) => {
     return res.status(200).end();
   }
 
-  // Restore true requested URL if Vercel serverless gateway altered or stripped it
-  const matchedPath = (req.headers['x-matched-path'] as string) || (req.headers['x-vercel-matched-path'] as string);
-  if (matchedPath && matchedPath.startsWith('/api') && req.url !== matchedPath) {
-    req.url = matchedPath;
+  // Normalize URL if /api prefix was stripped by a reverse proxy
+  if (req.url && !req.url.startsWith('/api') && !req.url.startsWith('/assets') && req.url !== '/favicon.ico') {
+    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
   }
   next();
 });
@@ -669,11 +668,31 @@ let users: User[] = [
     }
   }
 
-  if (!process.env.VERCEL) {
-    seedDefaultAdmin().catch(console.error);
-    seedDemoAccounts().catch(console.error);
-    autoApproveExistingLawyers().catch(console.error);
+  let isDemoSeeded = false;
+  let seedingInProgress: Promise<void> | null = null;
+
+  async function ensureDemoAccountsSeeded() {
+    if (isDemoSeeded) return;
+    if (seedingInProgress) return seedingInProgress;
+
+    seedingInProgress = (async () => {
+      try {
+        await seedDefaultAdmin();
+        await seedDemoAccounts();
+        await autoApproveExistingLawyers();
+        isDemoSeeded = true;
+      } catch (err) {
+        console.warn("[Startup Seeding Warning]:", err);
+      } finally {
+        seedingInProgress = null;
+      }
+    })();
+
+    return seedingInProgress;
   }
+
+  // Trigger initial seeding in background
+  ensureDemoAccountsSeeded().catch(() => {});
 
   // -------------------------------------------------------------
   // FIREBASE CLOUD MESSAGING (FCM) INITIALIZATION (OPTIONAL / ON-DEMAND)
@@ -750,7 +769,8 @@ let users: User[] = [
   // API ROUTE HANDLERS
   // -------------------------------------------------------------
 
-  app.get("/api/config", (req, res) => {
+  app.get("/api/config", async (req, res) => {
+    ensureDemoAccountsSeeded().catch(() => {});
     res.json({
       supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || "https://stgwfcanxhbqvolfpmft.supabase.co",
       supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_S8g3NfVeu6JGCEiyJgYrwQ_sH4MN99S",
@@ -765,66 +785,74 @@ let users: User[] = [
     }
 
     try {
+      await ensureDemoAccountsSeeded();
       const cleanEmail = email.trim().toLowerCase();
 
+      let matchedUser: any = null;
       if (supabase) {
-        const { data: user, error: uErr } = await supabase
-          .from('users')
-          .select('*')
-          .ilike('email', cleanEmail)
-          .maybeSingle();
+        try {
+          const { data: user, error: uErr } = await supabase
+            .from('users')
+            .select('*')
+            .ilike('email', cleanEmail)
+            .maybeSingle();
 
-        if (uErr) throw uErr;
-        if (!user) {
-          return res.status(401).json({ error: "No account found with this email address." });
+          if (!uErr && user) {
+            matchedUser = user;
+          }
+        } catch (e) {
+          // Fall through to in-memory accounts
+        }
+      }
+
+      if (matchedUser) {
+        if (role && matchedUser.role !== role) {
+          return res.status(401).json({ error: `This account is registered as a ${matchedUser.role}, not a ${role}.` });
         }
 
-        if (role && user.role !== role) {
-          return res.status(401).json({ error: `This account is registered as a ${user.role}, not a ${role}.` });
-        }
-
-        if (user.is_blocked) {
+        if (matchedUser.is_blocked) {
           return res.status(403).json({ error: "This account has been blocked by administrators." });
         }
 
-        const isValid = user.password_hash 
-          ? verifyPassword(password, user.password_hash)
+        const isValid = matchedUser.password_hash 
+          ? verifyPassword(password, matchedUser.password_hash)
           : (password === "password123" || password === "admin123");
 
         if (!isValid) {
           return res.status(401).json({ error: "Incorrect password. Please verify and try again." });
         }
 
-        const token = `token-${user.id}-${Date.now()}`;
+        const token = `token-${matchedUser.id}-${Date.now()}`;
         return res.json({
-          user: mapUserToTS(user),
+          user: mapUserToTS(matchedUser),
           token
         });
       }
 
-      const user = users.find(u => u.email.toLowerCase() === cleanEmail);
-      if (!user) {
+      // Fallback to in-memory demo accounts (admin, client, lawyer)
+      const fallbackUser = users.find(u => u.email.toLowerCase() === cleanEmail);
+      if (!fallbackUser) {
         return res.status(401).json({ error: "No registered account found with that email." });
       }
 
-      if (role && user.role !== role) {
-        return res.status(401).json({ error: `This account is registered as a ${user.role}, not a ${role}.` });
+      if (role && fallbackUser.role !== role) {
+        return res.status(401).json({ error: `This account is registered as a ${fallbackUser.role}, not a ${role}.` });
       }
 
-      if (user.isBlocked) {
+      if (fallbackUser.isBlocked) {
         return res.status(403).json({ error: "This account has been blocked by administrators." });
       }
 
-      const isValid = user.passwordHash
-        ? verifyPassword(password, user.passwordHash)
-        : (password === "password123" || password === "admin123" || password === user.password);
+      const isValid = fallbackUser.passwordHash
+        ? verifyPassword(password, fallbackUser.passwordHash)
+        : (password === "password123" || password === "admin123" || password === fallbackUser.password);
 
       if (!isValid) {
         return res.status(401).json({ error: "Incorrect password. Please verify and try again." });
       }
 
-      const token = `token-${user.id}-${Date.now()}`;
-      const sanitizedUser: User = { ...user };
+      const token = `token-${fallbackUser.id}-${Date.now()}`;
+      const sanitizedUser: User = { ...fallbackUser };
       delete (sanitizedUser as any).passwordHash;
       delete sanitizedUser.password;
 
@@ -883,10 +911,12 @@ let users: User[] = [
 
   app.get("/api/auth/current", async (req, res) => {
     try {
+      await ensureDemoAccountsSeeded();
       if (supabase) {
         const { data, error } = await supabase.from('users').select('*');
-        if (error) throw error;
-        return res.json({ users: data.map(mapUserToTS) });
+        if (!error && data && data.length > 0) {
+          return res.json({ users: data.map(mapUserToTS) });
+        }
       }
       const sanitized = users.map(u => {
         const copy: any = { ...u };
@@ -896,7 +926,13 @@ let users: User[] = [
       });
       res.json({ users: sanitized });
     } catch (e: any) {
-      res.status(500).json({ error: "Failed to retrieve current users context: " + e.message });
+      const sanitized = users.map(u => {
+        const copy: any = { ...u };
+        delete copy.passwordHash;
+        delete copy.password;
+        return copy as User;
+      });
+      res.json({ users: sanitized });
     }
   });
 
@@ -3422,13 +3458,19 @@ Rules:
   // VITE DEV SERVER / PRODUCTION STATIC ASSET INJECTION
   // -------------------------------------------------------------
   async function startServer() {
+    if (process.env.VERCEL) return;
     if (process.env.NODE_ENV !== "production") {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
+      try {
+        const viteModule = "vite";
+        const { createServer: createViteServer } = await import(viteModule);
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: "spa",
+        });
+        app.use(vite.middlewares);
+      } catch (viteErr) {
+        console.warn("[Vite Middleware Notice]:", viteErr);
+      }
     } else {
       const distPath = path.join(process.cwd(), 'dist');
       app.use(express.static(distPath));
