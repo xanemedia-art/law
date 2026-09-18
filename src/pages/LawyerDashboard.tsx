@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Scale, Award, ShieldAlert, DollarSign, Wallet, Star, ArrowLeft, RefreshCw, Send, CheckCircle2, History, Sun, Moon, LogOut, LayoutDashboard, Compass, Calendar, Plus, FolderOpen, Upload, FileText, ShieldCheck, Video as VideoIcon, PhoneCall, MessageSquare, XCircle } from 'lucide-react';
+import { Scale, Award, ShieldAlert, DollarSign, Wallet, Star, ArrowLeft, RefreshCw, Send, CheckCircle2, History, Sun, Moon, LogOut, LayoutDashboard, Compass, Calendar, Plus, FolderOpen, Upload, FileText, ShieldCheck, Video as VideoIcon, PhoneCall, MessageSquare, XCircle, CreditCard, Zap } from 'lucide-react';
 import { User, LawyerProfile, Consultation, STATE_DISTRICTS, Case } from '../types';
 import { getSupabaseClient } from '../lib/supabase';
 
@@ -455,27 +455,82 @@ export default function LawyerDashboard({ currentUser, theme, onToggleTheme }: L
   };
 
 
-  const handlePaySubscription = async () => {
+  const handlePaySubscription = async (forceMock: boolean = false) => {
     if (!currentUser || submittingSub) return;
     setSubmittingSub(true);
-    try {
-      const res = await fetch("/api/lawyers/pay-subscription", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: currentUser.id })
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert("Subscription fee of ₹1200 paid successfully! Your annual advocate profile is now active.");
-        fetchProfile();
-        fetchWalletAndHistory();
-      } else {
-        alert("Payment failed: " + data.error);
+
+    const completeSubscription = async (payRef: string) => {
+      try {
+        const res = await fetch("/api/lawyers/pay-subscription", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: currentUser.id, paymentReference: payRef })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`Annual advocate subscription fee of ₹1200 paid successfully! (Ref: ${payRef}) Your profile is now active.`);
+          fetchProfile();
+          fetchWalletAndHistory();
+        } else {
+          alert("Payment failed: " + data.error);
+        }
+      } catch (err: any) {
+        alert("Subscription payment failed: " + err.message);
+      } finally {
+        setSubmittingSub(false);
       }
-    } catch (err: any) {
-      alert("Subscription payment failed: " + err.message);
-    } finally {
-      setSubmittingSub(false);
+    };
+
+    if (forceMock) {
+      await completeSubscription(`rzp_mock_sub_${Date.now()}`);
+      return;
+    }
+
+    try {
+      let keyId = "";
+      try {
+        const cfgRes = await fetch("/api/config");
+        const cfg = await cfgRes.json();
+        keyId = cfg.razorpayKeyId || "";
+      } catch (e) {}
+
+      if ((window as any).Razorpay && keyId) {
+        const options = {
+          key: keyId,
+          amount: 120000, // ₹1200 in paise
+          currency: "INR",
+          name: "LegalTalk India",
+          description: "Annual Advocate Verification & Platform Subscription",
+          image: "/favicon.ico",
+          prefill: {
+            name: currentUser.name || "Advocate",
+            email: currentUser.email || "advocate@demo.in",
+            contact: currentUser.mobile || "9988776655"
+          },
+          theme: {
+            color: "#4f46e5"
+          },
+          handler: async (response: any) => {
+            const payId = response.razorpay_payment_id || `rzp_sub_${Date.now()}`;
+            await completeSubscription(payId);
+          },
+          modal: {
+            ondismiss: () => {
+              setSubmittingSub(false);
+            }
+          }
+        };
+        const rzp = new (window as any).Razorpay(options);
+        rzp.on('payment.failed', (resp: any) => {
+          alert('Razorpay payment failed: ' + (resp.error?.description || 'Unknown error'));
+          setSubmittingSub(false);
+        });
+        rzp.open();
+      } else {
+        await completeSubscription(`rzp_mock_sub_${Date.now()}`);
+      }
+    } catch (e) {
+      await completeSubscription(`rzp_mock_sub_${Date.now()}`);
     }
   };
 
@@ -923,15 +978,26 @@ export default function LawyerDashboard({ currentUser, theme, onToggleTheme }: L
                     Your profile requires an annual directory registry fee of <strong>₹1,200</strong> to list in search rosters and receive citizen consultations.
                   </p>
                   <p className="text-[10px] text-indigo-650 dark:text-indigo-400 mt-2 font-bold bg-indigo-50 dark:bg-indigo-950/45 py-2 px-3 rounded-lg border border-indigo-100/50 dark:border-indigo-900/50">
-                    Chambers Balance: ₹{lawyerWallet.toFixed(2)}. The annual fee will be deducted directly. Recharge your wallet in the Payout Ledger tab if needed.
+                    Chambers Balance: ₹{lawyerWallet.toFixed(2)}. The annual fee can be paid directly via Razorpay portal checkout or simulated instantly for testing.
                   </p>
-                  <button
-                    onClick={handlePaySubscription}
-                    disabled={submittingSub}
-                    className="w-full bg-indigo-650 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all mt-6 text-xs cursor-pointer"
-                  >
-                    {submittingSub ? "Processing..." : "Pay Annual Subscription (₹1,200)"}
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6">
+                    <button
+                      onClick={() => handlePaySubscription(false)}
+                      disabled={submittingSub}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      <span>{submittingSub ? "Connecting..." : "Pay via Razorpay Portal"}</span>
+                    </button>
+                    <button
+                      onClick={() => handlePaySubscription(true)}
+                      disabled={submittingSub}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold py-3 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                    >
+                      <Zap className="w-4 h-4 text-amber-400" />
+                      <span>Quick Test Payment</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

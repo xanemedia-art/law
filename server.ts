@@ -50,18 +50,13 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 app.use(express.json());
 
-// CORS & Path Normalizing Middleware for Vercel Serverless Function compatibility
+// CORS Middleware
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
   if (req.method === "OPTIONS") {
     return res.status(200).end();
-  }
-
-  // Normalize URL if /api prefix was stripped by a reverse proxy
-  if (req.url && !req.url.startsWith('/api') && !req.url.startsWith('/assets') && req.url !== '/favicon.ico') {
-    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
   }
   next();
 });
@@ -392,10 +387,35 @@ let users: User[] = [
       walletId: row.wallet_id,
       amount: Number(row.amount),
       type: row.type,
-      status: row.status,
+      status: row.status || (row.type === 'withdrawal' ? 'pending' : 'completed'),
       description: row.description || "",
       timestamp: row.created_at
     };
+  }
+
+  async function insertWalletTransaction(tx: { id?: string, wallet_id: string, amount: number, type: string, description?: string, status?: string, reference_id?: string }): Promise<any> {
+    if (!supabase) return null;
+    const cleanPayload: any = {
+      id: tx.id || crypto.randomUUID(),
+      wallet_id: tx.wallet_id,
+      amount: tx.amount,
+      type: tx.type,
+      description: tx.description || ""
+    };
+
+    const fullPayload: any = { ...cleanPayload };
+    if (tx.status) fullPayload.status = tx.status;
+    if (tx.reference_id) fullPayload.reference_id = tx.reference_id;
+
+    let res = await supabase.from('wallet_transactions').insert([fullPayload]).select().single();
+    if (res.error && (res.error.message?.includes('status') || res.error.message?.includes('reference_id') || res.error.message?.includes('column'))) {
+      res = await supabase.from('wallet_transactions').insert([cleanPayload]).select().single();
+    }
+    if (res.error) {
+      console.warn("[Wallet Transaction Insert Warning]:", res.error.message);
+      return cleanPayload;
+    }
+    return res.data || cleanPayload;
   }
 
   function mapMessageToTS(row: any): ConsultationMessage {
@@ -781,6 +801,24 @@ let users: User[] = [
   // API ROUTE HANDLERS
   // -------------------------------------------------------------
 
+  app.get(["/api", "/api/", "/api/health"], (req, res) => {
+    res.json({
+      status: "healthy",
+      service: "LegalTalk India Backend API",
+      version: "1.0.0",
+      database: supabase ? "connected" : "in-memory-fallback",
+      aiEngine: process.env.GEMINI_API_KEY ? "gemini-3.6-flash active" : "mock-fallback",
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // Browser navigation convenience redirects (e.g. if user types /api/login in address bar)
+  app.get("/api/login", (req, res) => res.redirect("/login"));
+  app.get("/api/register", (req, res) => res.redirect("/register"));
+  app.get("/api/admin", (req, res) => res.redirect("/admin"));
+  app.get("/api/client", (req, res) => res.redirect("/client"));
+  app.get("/api/lawyer", (req, res) => res.redirect("/lawyer"));
+
   app.get("/api/config", async (req, res) => {
     ensureDemoAccountsSeeded().catch(() => {});
     res.json({
@@ -1140,14 +1178,13 @@ let users: User[] = [
         // Welcome bonus
         try {
           await supabase.from('wallets').upsert([{ user_id: newUser.id, balance: 100 }]);
-          await supabase.from('wallet_transactions').insert([{
+          await insertWalletTransaction({
             id: crypto.randomUUID(),
             wallet_id: newUser.id,
             amount: 100,
             type: 'deposit',
-            status: 'completed',
             description: 'Welcome bonus deposit (Simulated)'
-          }]);
+          });
 
           await supabase.from('audit_logs').insert([{
             id: crypto.randomUUID(),
@@ -1764,11 +1801,10 @@ let users: User[] = [
       res.status(500).json({ error: e.message });
     }
   });
-
   app.post("/api/lawyers/pay-subscription", async (req, res) => {
-    const { userId } = req.body;
+    const { userId, paymentReference } = req.body;
     if (!userId) {
-      return res.status(400).json({ error: "userId is required" });
+      return res.status(400).json({ error: "User ID is required" });
     }
 
     try {
@@ -1780,17 +1816,19 @@ let users: User[] = [
           return res.status(404).json({ error: "Lawyer profile not found" });
         }
 
-        const { data: wallet, error: wErr } = await supabase.from('wallets').select('balance').eq('user_id', userId).maybeSingle();
-        if (wErr) throw wErr;
-        const currentBalance = Number(wallet?.balance || 0);
+        if (!paymentReference) {
+          const { data: wallet, error: wErr } = await supabase.from('wallets').select('balance').eq('user_id', userId).maybeSingle();
+          if (wErr) throw wErr;
+          const currentBalance = Number(wallet?.balance || 0);
 
-        if (currentBalance < 1200) {
-          return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of ₹1200. Please deposit funds first." });
+          if (currentBalance < 1200) {
+            return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of ₹1200. Please deposit funds first." });
+          }
+
+          const newBalance = currentBalance - 1200;
+          const { error: wUpErr } = await supabase.from('wallets').update({ balance: newBalance }).eq('user_id', userId);
+          if (wUpErr) throw wUpErr;
         }
-
-        const newBalance = currentBalance - 1200;
-        const { error: wUpErr } = await supabase.from('wallets').update({ balance: newBalance }).eq('user_id', userId);
-        if (wUpErr) throw wUpErr;
 
         const { data: updatedProfile, error: uErr } = await supabase
           .from('lawyers')
@@ -1800,20 +1838,20 @@ let users: User[] = [
           .single();
         if (uErr) throw uErr;
 
-        await supabase.from('wallet_transactions').insert([{
+        await insertWalletTransaction({
           id: crypto.randomUUID(),
           wallet_id: userId,
           amount: 1200,
           type: 'deduction',
-          status: 'completed',
-          description: 'Annual Advocate Subscription Fee Paid (₹1200)'
-        }]);
+          description: paymentReference ? `Annual Advocate Subscription Fee Paid via Razorpay (Ref: ${paymentReference})` : 'Annual Advocate Subscription Fee Paid (₹1200)',
+          reference_id: paymentReference || undefined
+        });
 
         await supabase.from('audit_logs').insert([{
           id: crypto.randomUUID(),
           user_id: userId,
           action: 'LAWYER_SUBSCRIPTION_PAID',
-          details: { subscriptionExpiresAt: oneYearFromNow }
+          details: { subscriptionExpiresAt: oneYearFromNow, paymentReference }
         }]);
 
         return res.json({ success: true, profile: mapLawyerToTS(updatedProfile) });
@@ -1824,17 +1862,20 @@ let users: User[] = [
         return res.status(404).json({ error: "Lawyer profile not found" });
       }
 
-      let wallet = wallets.find(w => w.userId === userId);
-      if (!wallet) {
-        wallet = { userId, balance: 0 };
-        wallets.push(wallet);
+      if (!paymentReference) {
+        let wallet = wallets.find(w => w.userId === userId);
+        if (!wallet) {
+          wallet = { userId, balance: 0 };
+          wallets.push(wallet);
+        }
+
+        if (wallet.balance < 1200) {
+          return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of ₹1200. Please deposit funds first." });
+        }
+
+        wallet.balance -= 1200;
       }
 
-      if (wallet.balance < 1200) {
-        return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of ₹1200. Please deposit funds first." });
-      }
-
-      wallet.balance -= 1200;
       lawyerProfiles[idx].subscriptionExpiresAt = oneYearFromNow;
 
       walletTransactions.push({
@@ -1843,7 +1884,7 @@ let users: User[] = [
         amount: 1200,
         type: 'deduction',
         status: 'completed',
-        description: 'Annual Advocate Subscription Fee Paid (₹1200)',
+        description: paymentReference ? `Annual Advocate Subscription Fee Paid via Razorpay (Ref: ${paymentReference})` : 'Annual Advocate Subscription Fee Paid (₹1200)',
         timestamp: new Date().toISOString()
       });
 
@@ -1851,7 +1892,7 @@ let users: User[] = [
         id: `aud-sub-${Date.now()}`,
         userId,
         action: "LAWYER_SUBSCRIPTION_PAID",
-        details: { subscriptionExpiresAt: oneYearFromNow },
+        details: { subscriptionExpiresAt: oneYearFromNow, paymentReference },
         timestamp: new Date().toISOString()
       });
 
@@ -1915,20 +1956,14 @@ let users: User[] = [
         const { error: upErr } = await supabase.from('wallets').update({ balance: newBal }).eq('user_id', userId);
         if (upErr) throw upErr;
 
-        const { data: tx, error: tErr } = await supabase
-          .from('wallet_transactions')
-          .insert([{
-            id: crypto.randomUUID(),
-            wallet_id: userId,
-            amount: val,
-            type: 'deposit',
-            status: 'completed',
-            description: `Instant wallet recharge. Razorpay Order Ref: ${rzpOrderId || 'rzp_custom_' + Date.now()}`,
-            reference_id: rzpOrderId
-          }])
-          .select()
-          .single();
-        if (tErr) throw tErr;
+        const tx = await insertWalletTransaction({
+          id: crypto.randomUUID(),
+          wallet_id: userId,
+          amount: val,
+          type: 'deposit',
+          description: `Instant wallet recharge. Razorpay Order Ref: ${rzpOrderId || 'rzp_custom_' + Date.now()}`,
+          reference_id: rzpOrderId
+        });
 
         await supabase.from('audit_logs').insert([{
           id: crypto.randomUUID(),
@@ -2226,24 +2261,18 @@ let users: User[] = [
             platform_share: platformCommission
           }]);
 
-          await supabase.from('wallet_transactions').insert([
-            {
-              id: crypto.randomUUID(),
-              wallet_id: session.client_id,
-              amount: currentBal,
-              type: 'deduction',
-              status: 'completed',
-              description: `Exhausted session costs: Completed ${endMins} minutes booking.`
-            },
-            {
-              id: crypto.randomUUID(),
-              wallet_id: session.lawyer_id,
-              amount: lawyerReceipt,
-              type: 'credit',
-              status: 'completed',
-              description: `Earned 100% fee of ${endMins} minutes interaction with client.`
-            }
-          ]);
+          await insertWalletTransaction({
+            wallet_id: session.client_id,
+            amount: currentBal,
+            type: 'deduction',
+            description: `Exhausted session costs: Completed ${endMins} minutes booking.`
+          });
+          await insertWalletTransaction({
+            wallet_id: session.lawyer_id,
+            amount: lawyerReceipt,
+            type: 'credit',
+            description: `Earned 100% fee of ${endMins} minutes interaction with client.`
+          });
 
           const { data: updatedS } = await supabase.from('consultations').select('*').eq('id', session.id).single();
 
@@ -2416,24 +2445,18 @@ let users: User[] = [
           platform_share: platformCommission
         }]);
 
-        await supabase.from('wallet_transactions').insert([
-          {
-            id: crypto.randomUUID(),
-            wallet_id: session.client_id,
-            amount: sessionCost,
-            type: 'deduction',
-            status: 'completed',
-            description: `Billed for ${session.type} consultation with ${session.lawyer_name}.`
-          },
-          {
-            id: crypto.randomUUID(),
-            wallet_id: session.lawyer_id,
-            amount: lawyerReceipt,
-            type: 'credit',
-            status: 'completed',
-            description: `Earned 100% payout from ${session.type} consultation with ${session.client_name}.`
-          }
-        ]);
+        await insertWalletTransaction({
+          wallet_id: session.client_id,
+          amount: sessionCost,
+          type: 'deduction',
+          description: `Billed for ${session.type} consultation with ${session.lawyer_name}.`
+        });
+        await insertWalletTransaction({
+          wallet_id: session.lawyer_id,
+          amount: lawyerReceipt,
+          type: 'credit',
+          description: `Earned 100% payout from ${session.type} consultation with ${session.client_name}.`
+        });
 
         await supabase.from('audit_logs').insert([{
           id: crypto.randomUUID(),
@@ -2802,14 +2825,13 @@ let users: User[] = [
         const newBal = curBal - requestVal;
         await supabase.from('wallets').update({ balance: newBal }).eq('user_id', userId);
 
-        await supabase.from('wallet_transactions').insert([{
+        await insertWalletTransaction({
           id: crypto.randomUUID(),
           wallet_id: userId,
           amount: requestVal,
           type: 'withdrawal',
-          status: 'pending',
           description: "Requested withdrawal of earnings to " + bankAccountNumber
-        }]);
+        });
 
         return res.status(201).json({ success: true, request: mapWithdrawalToTS(withdrawal), walletBalance: newBal });
       }
@@ -3085,14 +3107,16 @@ let users: User[] = [
           .select('*')
           .eq('wallet_id', reqData.lawyer_id)
           .eq('type', 'withdrawal')
-          .eq('status', 'pending')
+          .order('created_at', { ascending: false })
           .limit(1);
 
         if (txs && txs.length > 0) {
-          await supabase
-            .from('wallet_transactions')
-            .update({ status: 'completed', description: txs[0].description + " (Approved by Admin)" })
-            .eq('id', txs[0].id);
+          try {
+            await supabase
+              .from('wallet_transactions')
+              .update({ description: (txs[0].description || "") + " (Approved by Admin)" })
+              .eq('id', txs[0].id);
+          } catch (e) {}
         }
 
         await supabase.from('audit_logs').insert([{
@@ -3574,6 +3598,20 @@ Rules:
           appType: "spa",
         });
         app.use(vite.middlewares);
+        app.use('*', async (req, res, next) => {
+          if (req.originalUrl.startsWith('/api')) {
+            return next();
+          }
+          try {
+            const indexPath = path.resolve(process.cwd(), 'index.html');
+            let template = fs.readFileSync(indexPath, 'utf-8');
+            template = await vite.transformIndexHtml(req.originalUrl, template);
+            res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+          } catch (e: any) {
+            vite.ssrFixStacktrace(e);
+            next(e);
+          }
+        });
       } catch (viteErr) {
         console.warn("[Vite Middleware Notice]:", viteErr);
       }

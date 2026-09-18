@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Scale, Search, SlidersHorizontal, Star, MessageSquare, PhoneCall, Video, Wallet, ArrowLeft, RefreshCw, Layers, Check, ShieldCheck, History, Sparkles, Sun, Moon, LogOut, LayoutDashboard, Calendar, Compass, Shield, Plus, FolderOpen, Upload, FileText } from 'lucide-react';
+import { Scale, Search, SlidersHorizontal, Star, MessageSquare, PhoneCall, Video, Wallet, ArrowLeft, RefreshCw, Layers, Check, ShieldCheck, History, Sparkles, Sun, Moon, LogOut, LayoutDashboard, Calendar, Compass, Shield, Plus, FolderOpen, Upload, FileText, CreditCard, Zap } from 'lucide-react';
 import { User, Consultation, STATE_DISTRICTS, Case, CaseDocument } from '../types';
 
 
@@ -234,21 +234,15 @@ export default function ClientDashboard({ currentUser, onInitiateSession, theme,
     }
   };
 
-  const handleRazorpayDeposit = async (e: React.FormEvent) => {
-
-    e.preventDefault();
-    if (!currentUser || depositing || !rechargeVal || Number(rechargeVal) <= 0) return;
-
-    setDepositing(true);
-    const orderId = `rzp_test_ord_${Math.random().toString(36).substring(2, 11)}`;
+  const executeDeposit = async (orderRef: string) => {
     try {
       const res = await fetch("/api/wallet/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: currentUser.id,
+          userId: currentUser?.id,
           amount: Number(rechargeVal),
-          rzpOrderId: orderId
+          rzpOrderId: orderRef
         })
       });
       const data = await res.json();
@@ -256,13 +250,78 @@ export default function ClientDashboard({ currentUser, onInitiateSession, theme,
         setWalletBalance(data.balance);
         setTransactions(prev => [data.transaction, ...prev]);
         setRechargeOpen(false);
-        alert(`Wallet charged successfully with ₹${rechargeVal}!`);
+        alert(`Wallet charged successfully with ₹${rechargeVal}! (Ref: ${orderRef})`);
+      } else {
+        alert("Deposit failed: " + data.error);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert("Transaction error: " + err.message);
     } finally {
       setDepositing(false);
     }
+  };
+
+  const handleOpenRazorpayPortal = async () => {
+    if (!currentUser || depositing || !rechargeVal || Number(rechargeVal) <= 0) return;
+    setDepositing(true);
+
+    try {
+      let keyId = "";
+      try {
+        const cfgRes = await fetch("/api/config");
+        const cfg = await cfgRes.json();
+        keyId = cfg.razorpayKeyId || "";
+      } catch (e) {}
+
+      if ((window as any).Razorpay && keyId) {
+        const options = {
+          key: keyId,
+          amount: Math.round(Number(rechargeVal) * 100),
+          currency: "INR",
+          name: "LegalTalk India",
+          description: `Wallet Balance Top-up: ₹${rechargeVal}`,
+          image: "/favicon.ico",
+          prefill: {
+            name: currentUser.name || "Client",
+            email: currentUser.email || "client@demo.in",
+            contact: currentUser.mobile || "9988776655"
+          },
+          theme: {
+            color: "#2563eb"
+          },
+          handler: async (response: any) => {
+            const payId = response.razorpay_payment_id || `rzp_live_${Date.now()}`;
+            await executeDeposit(payId);
+          },
+          modal: {
+            ondismiss: () => {
+              setDepositing(false);
+            }
+          }
+        };
+        const rzp = new (window as any).Razorpay(options);
+        rzp.on('payment.failed', (resp: any) => {
+          alert('Razorpay payment failed: ' + (resp.error?.description || 'Unknown error'));
+          setDepositing(false);
+        });
+        rzp.open();
+      } else {
+        const orderId = `rzp_mock_ord_${Math.random().toString(36).substring(2, 11)}`;
+        await executeDeposit(orderId);
+      }
+    } catch (err: any) {
+      console.error("Razorpay Portal Error:", err);
+      const orderId = `rzp_mock_ord_${Math.random().toString(36).substring(2, 11)}`;
+      await executeDeposit(orderId);
+    }
+  };
+
+  const handleSimulatedPayment = async () => {
+    if (!currentUser || depositing || !rechargeVal || Number(rechargeVal) <= 0) return;
+    setDepositing(true);
+    const orderId = `rzp_mock_ord_${Math.random().toString(36).substring(2, 11)}`;
+    await executeDeposit(orderId);
   };
 
   const handleOpenReviewModal = (consultationId: string) => {
@@ -1104,13 +1163,27 @@ export default function ClientDashboard({ currentUser, onInitiateSession, theme,
                 </div>
               </div>
 
-              <button
-                onClick={handleRazorpayDeposit}
-                disabled={depositing}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl transition-all shadow-md mt-2 flex items-center justify-center gap-2 cursor-pointer border border-blue-550"
-              >
-                {depositing ? "Initiating transaction gateway..." : "Simulate Razorpay Payment"}
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleOpenRazorpayPortal}
+                  disabled={depositing}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                >
+                  <CreditCard className="w-4 h-4" />
+                  <span>{depositing ? "Connecting..." : "Pay via Razorpay Portal"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSimulatedPayment}
+                  disabled={depositing}
+                  className="w-full bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-bold py-3 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                >
+                  <Zap className="w-4 h-4 text-amber-400" />
+                  <span>Quick Test Payment</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

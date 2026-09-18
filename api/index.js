@@ -34,9 +34,6 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
-  if (req.url && !req.url.startsWith("/api") && !req.url.startsWith("/assets") && req.url !== "/favicon.ico") {
-    req.url = "/api" + (req.url.startsWith("/") ? req.url : "/" + req.url);
-  }
   next();
 });
 var users = [
@@ -266,10 +263,32 @@ function mapTransactionToTS(row) {
     walletId: row.wallet_id,
     amount: Number(row.amount),
     type: row.type,
-    status: row.status,
+    status: row.status || (row.type === "withdrawal" ? "pending" : "completed"),
     description: row.description || "",
     timestamp: row.created_at
   };
+}
+async function insertWalletTransaction(tx) {
+  if (!supabase) return null;
+  const cleanPayload = {
+    id: tx.id || crypto.randomUUID(),
+    wallet_id: tx.wallet_id,
+    amount: tx.amount,
+    type: tx.type,
+    description: tx.description || ""
+  };
+  const fullPayload = { ...cleanPayload };
+  if (tx.status) fullPayload.status = tx.status;
+  if (tx.reference_id) fullPayload.reference_id = tx.reference_id;
+  let res = await supabase.from("wallet_transactions").insert([fullPayload]).select().single();
+  if (res.error && (res.error.message?.includes("status") || res.error.message?.includes("reference_id") || res.error.message?.includes("column"))) {
+    res = await supabase.from("wallet_transactions").insert([cleanPayload]).select().single();
+  }
+  if (res.error) {
+    console.warn("[Wallet Transaction Insert Warning]:", res.error.message);
+    return cleanPayload;
+  }
+  return res.data || cleanPayload;
 }
 function mapMessageToTS(row) {
   if (!row) return row;
@@ -559,6 +578,21 @@ function getGeminiClient() {
   }
   return aiClient;
 }
+app.get(["/api", "/api/", "/api/health"], (req, res) => {
+  res.json({
+    status: "healthy",
+    service: "LegalTalk India Backend API",
+    version: "1.0.0",
+    database: supabase ? "connected" : "in-memory-fallback",
+    aiEngine: process.env.GEMINI_API_KEY ? "gemini-3.6-flash active" : "mock-fallback",
+    timestamp: (/* @__PURE__ */ new Date()).toISOString()
+  });
+});
+app.get("/api/login", (req, res) => res.redirect("/login"));
+app.get("/api/register", (req, res) => res.redirect("/register"));
+app.get("/api/admin", (req, res) => res.redirect("/admin"));
+app.get("/api/client", (req, res) => res.redirect("/client"));
+app.get("/api/lawyer", (req, res) => res.redirect("/lawyer"));
 app.get("/api/config", async (req, res) => {
   ensureDemoAccountsSeeded().catch(() => {
   });
@@ -834,14 +868,13 @@ app.post("/api/auth/register", async (req, res) => {
       if (error) throw error;
       try {
         await supabase.from("wallets").upsert([{ user_id: newUser2.id, balance: 100 }]);
-        await supabase.from("wallet_transactions").insert([{
+        await insertWalletTransaction({
           id: crypto.randomUUID(),
           wallet_id: newUser2.id,
           amount: 100,
           type: "deposit",
-          status: "completed",
           description: "Welcome bonus deposit (Simulated)"
-        }]);
+        });
         await supabase.from("audit_logs").insert([{
           id: crypto.randomUUID(),
           user_id: newUser2.id,
@@ -1375,9 +1408,9 @@ app.post("/api/lawyers/update-prices", async (req, res) => {
   }
 });
 app.post("/api/lawyers/pay-subscription", async (req, res) => {
-  const { userId } = req.body;
+  const { userId, paymentReference } = req.body;
   if (!userId) {
-    return res.status(400).json({ error: "userId is required" });
+    return res.status(400).json({ error: "User ID is required" });
   }
   try {
     const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1e3).toISOString();
@@ -1386,30 +1419,32 @@ app.post("/api/lawyers/pay-subscription", async (req, res) => {
       if (fErr || !currentProfile) {
         return res.status(404).json({ error: "Lawyer profile not found" });
       }
-      const { data: wallet2, error: wErr } = await supabase.from("wallets").select("balance").eq("user_id", userId).maybeSingle();
-      if (wErr) throw wErr;
-      const currentBalance = Number(wallet2?.balance || 0);
-      if (currentBalance < 1200) {
-        return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of \u20B91200. Please deposit funds first." });
+      if (!paymentReference) {
+        const { data: wallet, error: wErr } = await supabase.from("wallets").select("balance").eq("user_id", userId).maybeSingle();
+        if (wErr) throw wErr;
+        const currentBalance = Number(wallet?.balance || 0);
+        if (currentBalance < 1200) {
+          return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of \u20B91200. Please deposit funds first." });
+        }
+        const newBalance = currentBalance - 1200;
+        const { error: wUpErr } = await supabase.from("wallets").update({ balance: newBalance }).eq("user_id", userId);
+        if (wUpErr) throw wUpErr;
       }
-      const newBalance = currentBalance - 1200;
-      const { error: wUpErr } = await supabase.from("wallets").update({ balance: newBalance }).eq("user_id", userId);
-      if (wUpErr) throw wUpErr;
       const { data: updatedProfile, error: uErr } = await supabase.from("lawyers").update({ subscription_expires_at: oneYearFromNow }).eq("user_id", userId).select().single();
       if (uErr) throw uErr;
-      await supabase.from("wallet_transactions").insert([{
+      await insertWalletTransaction({
         id: crypto.randomUUID(),
         wallet_id: userId,
         amount: 1200,
         type: "deduction",
-        status: "completed",
-        description: "Annual Advocate Subscription Fee Paid (\u20B91200)"
-      }]);
+        description: paymentReference ? `Annual Advocate Subscription Fee Paid via Razorpay (Ref: ${paymentReference})` : "Annual Advocate Subscription Fee Paid (\u20B91200)",
+        reference_id: paymentReference || void 0
+      });
       await supabase.from("audit_logs").insert([{
         id: crypto.randomUUID(),
         user_id: userId,
         action: "LAWYER_SUBSCRIPTION_PAID",
-        details: { subscriptionExpiresAt: oneYearFromNow }
+        details: { subscriptionExpiresAt: oneYearFromNow, paymentReference }
       }]);
       return res.json({ success: true, profile: mapLawyerToTS(updatedProfile) });
     }
@@ -1417,15 +1452,17 @@ app.post("/api/lawyers/pay-subscription", async (req, res) => {
     if (idx === -1) {
       return res.status(404).json({ error: "Lawyer profile not found" });
     }
-    let wallet = wallets.find((w) => w.userId === userId);
-    if (!wallet) {
-      wallet = { userId, balance: 0 };
-      wallets.push(wallet);
+    if (!paymentReference) {
+      let wallet = wallets.find((w) => w.userId === userId);
+      if (!wallet) {
+        wallet = { userId, balance: 0 };
+        wallets.push(wallet);
+      }
+      if (wallet.balance < 1200) {
+        return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of \u20B91200. Please deposit funds first." });
+      }
+      wallet.balance -= 1200;
     }
-    if (wallet.balance < 1200) {
-      return res.status(400).json({ error: "Insufficient wallet balance to pay annual fee of \u20B91200. Please deposit funds first." });
-    }
-    wallet.balance -= 1200;
     lawyerProfiles[idx].subscriptionExpiresAt = oneYearFromNow;
     walletTransactions.push({
       id: `tx-sub-${Date.now()}`,
@@ -1433,14 +1470,14 @@ app.post("/api/lawyers/pay-subscription", async (req, res) => {
       amount: 1200,
       type: "deduction",
       status: "completed",
-      description: "Annual Advocate Subscription Fee Paid (\u20B91200)",
+      description: paymentReference ? `Annual Advocate Subscription Fee Paid via Razorpay (Ref: ${paymentReference})` : "Annual Advocate Subscription Fee Paid (\u20B91200)",
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
     auditLogs.push({
       id: `aud-sub-${Date.now()}`,
       userId,
       action: "LAWYER_SUBSCRIPTION_PAID",
-      details: { subscriptionExpiresAt: oneYearFromNow },
+      details: { subscriptionExpiresAt: oneYearFromNow, paymentReference },
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
     res.json({ success: true, profile: lawyerProfiles[idx] });
@@ -1491,16 +1528,14 @@ app.post("/api/wallet/deposit", async (req, res) => {
       const newBal = Number(wallet2.balance) + val;
       const { error: upErr } = await supabase.from("wallets").update({ balance: newBal }).eq("user_id", userId);
       if (upErr) throw upErr;
-      const { data: tx, error: tErr } = await supabase.from("wallet_transactions").insert([{
+      const tx = await insertWalletTransaction({
         id: crypto.randomUUID(),
         wallet_id: userId,
         amount: val,
         type: "deposit",
-        status: "completed",
         description: `Instant wallet recharge. Razorpay Order Ref: ${rzpOrderId || "rzp_custom_" + Date.now()}`,
         reference_id: rzpOrderId
-      }]).select().single();
-      if (tErr) throw tErr;
+      });
       await supabase.from("audit_logs").insert([{
         id: crypto.randomUUID(),
         user_id: userId,
@@ -1745,24 +1780,18 @@ app.post("/api/consultations/bill-minute", async (req, res) => {
           lawyer_share: lawyerReceipt,
           platform_share: platformCommission
         }]);
-        await supabase.from("wallet_transactions").insert([
-          {
-            id: crypto.randomUUID(),
-            wallet_id: session2.client_id,
-            amount: currentBal,
-            type: "deduction",
-            status: "completed",
-            description: `Exhausted session costs: Completed ${endMins} minutes booking.`
-          },
-          {
-            id: crypto.randomUUID(),
-            wallet_id: session2.lawyer_id,
-            amount: lawyerReceipt,
-            type: "credit",
-            status: "completed",
-            description: `Earned 100% fee of ${endMins} minutes interaction with client.`
-          }
-        ]);
+        await insertWalletTransaction({
+          wallet_id: session2.client_id,
+          amount: currentBal,
+          type: "deduction",
+          description: `Exhausted session costs: Completed ${endMins} minutes booking.`
+        });
+        await insertWalletTransaction({
+          wallet_id: session2.lawyer_id,
+          amount: lawyerReceipt,
+          type: "credit",
+          description: `Earned 100% fee of ${endMins} minutes interaction with client.`
+        });
         const { data: updatedS } = await supabase.from("consultations").select("*").eq("id", session2.id).single();
         return res.json({
           exhausted: true,
@@ -1906,24 +1935,18 @@ app.post("/api/consultations/end", async (req, res) => {
         lawyer_share: lawyerReceipt,
         platform_share: platformCommission
       }]);
-      await supabase.from("wallet_transactions").insert([
-        {
-          id: crypto.randomUUID(),
-          wallet_id: session2.client_id,
-          amount: sessionCost2,
-          type: "deduction",
-          status: "completed",
-          description: `Billed for ${session2.type} consultation with ${session2.lawyer_name}.`
-        },
-        {
-          id: crypto.randomUUID(),
-          wallet_id: session2.lawyer_id,
-          amount: lawyerReceipt,
-          type: "credit",
-          status: "completed",
-          description: `Earned 100% payout from ${session2.type} consultation with ${session2.client_name}.`
-        }
-      ]);
+      await insertWalletTransaction({
+        wallet_id: session2.client_id,
+        amount: sessionCost2,
+        type: "deduction",
+        description: `Billed for ${session2.type} consultation with ${session2.lawyer_name}.`
+      });
+      await insertWalletTransaction({
+        wallet_id: session2.lawyer_id,
+        amount: lawyerReceipt,
+        type: "credit",
+        description: `Earned 100% payout from ${session2.type} consultation with ${session2.client_name}.`
+      });
       await supabase.from("audit_logs").insert([{
         id: crypto.randomUUID(),
         user_id: session2.client_id,
@@ -2211,14 +2234,13 @@ app.post("/api/lawyers/withdraw", async (req, res) => {
       if (wErr) throw wErr;
       const newBal = curBal2 - requestVal2;
       await supabase.from("wallets").update({ balance: newBal }).eq("user_id", userId);
-      await supabase.from("wallet_transactions").insert([{
+      await insertWalletTransaction({
         id: crypto.randomUUID(),
         wallet_id: userId,
         amount: requestVal2,
         type: "withdrawal",
-        status: "pending",
         description: "Requested withdrawal of earnings to " + bankAccountNumber
-      }]);
+      });
       return res.status(201).json({ success: true, request: mapWithdrawalToTS(withdrawal), walletBalance: newBal });
     }
     const lawyer = lawyerProfiles.find((p) => p.userId === userId);
@@ -2433,9 +2455,12 @@ app.post("/api/admin/approve-withdrawal", async (req, res) => {
       }
       const { data: updated, error: uErr } = await supabase.from("withdrawals").update({ status: "approved", approved_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", withdrawalId).select().single();
       if (uErr) throw uErr;
-      const { data: txs } = await supabase.from("wallet_transactions").select("*").eq("wallet_id", reqData.lawyer_id).eq("type", "withdrawal").eq("status", "pending").limit(1);
+      const { data: txs } = await supabase.from("wallet_transactions").select("*").eq("wallet_id", reqData.lawyer_id).eq("type", "withdrawal").order("created_at", { ascending: false }).limit(1);
       if (txs && txs.length > 0) {
-        await supabase.from("wallet_transactions").update({ status: "completed", description: txs[0].description + " (Approved by Admin)" }).eq("id", txs[0].id);
+        try {
+          await supabase.from("wallet_transactions").update({ description: (txs[0].description || "") + " (Approved by Admin)" }).eq("id", txs[0].id);
+        } catch (e) {
+        }
       }
       await supabase.from("audit_logs").insert([{
         id: crypto.randomUUID(),
@@ -2833,6 +2858,20 @@ async function startServer() {
         appType: "spa"
       });
       app.use(vite.middlewares);
+      app.use("*", async (req, res, next) => {
+        if (req.originalUrl.startsWith("/api")) {
+          return next();
+        }
+        try {
+          const indexPath = path.resolve(process.cwd(), "index.html");
+          let template = fs.readFileSync(indexPath, "utf-8");
+          template = await vite.transformIndexHtml(req.originalUrl, template);
+          res.status(200).set({ "Content-Type": "text/html" }).end(template);
+        } catch (e) {
+          vite.ssrFixStacktrace(e);
+          next(e);
+        }
+      });
     } catch (viteErr) {
       console.warn("[Vite Middleware Notice]:", viteErr);
     }
