@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Scale, Search, SlidersHorizontal, Star, MessageSquare, PhoneCall, Video, Wallet, ArrowLeft, RefreshCw, Layers, Check, ShieldCheck, History, Sparkles, Sun, Moon, LogOut, LayoutDashboard, Calendar, Compass, Shield, Plus, FolderOpen, Upload, FileText, CreditCard, Zap } from 'lucide-react';
 import { User, Consultation, STATE_DISTRICTS, Case, CaseDocument } from '../types';
+import { openAIChat } from '../components/AIAssistant';
 
 
 interface ClientDashboardProps {
@@ -419,13 +420,14 @@ export default function ClientDashboard({ currentUser, onInitiateSession, theme,
               <span>Case Boards</span>
             </button>
 
-            <Link
-              to="/ai-assistant"
-              className="px-4 py-3 rounded-xl text-xs font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-850/50 flex items-center gap-2.5 transition-all"
+            <button
+              type="button"
+              onClick={() => openAIChat()}
+              className="w-full text-left px-4 py-3 rounded-xl text-xs font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-850/50 flex items-center gap-2.5 transition-all cursor-pointer"
             >
               <Sparkles className="w-4 h-4 text-indigo-550" />
               <span>AI Statutory Assistant</span>
-            </Link>
+            </button>
           </nav>
         </div>
 
@@ -459,6 +461,12 @@ export default function ClientDashboard({ currentUser, onInitiateSession, theme,
               <LogOut className="w-3.5 h-3.5" />
               <span>Log Out</span>
             </button>
+          </div>
+          <div className="pt-2 flex items-center justify-center gap-1.5 text-[10px] font-sans text-slate-400 dark:text-slate-500">
+            <span>Built By</span>
+            <span className="font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">
+              Xane Media
+            </span>
           </div>
         </div>
       </aside>

@@ -807,7 +807,7 @@ let users: User[] = [
       service: "LegalTalk India Backend API",
       version: "1.0.0",
       database: supabase ? "connected" : "in-memory-fallback",
-      aiEngine: process.env.GEMINI_API_KEY ? "gemini-3.6-flash active" : "mock-fallback",
+      aiEngine: process.env.GEMINI_API_KEY ? "XANE AI (active)" : "mock-fallback",
       timestamp: new Date().toISOString()
     });
   });

@@ -10,7 +10,7 @@ import LawyerDashboard from './pages/LawyerDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import ActiveSession from './pages/ActiveSession';
 import DeveloperHub from './pages/DeveloperHub';
-import AIAssistant from './components/AIAssistant';
+import AIAssistant, { openAIChat } from './components/AIAssistant';
 import InvestorPitch from './pages/InvestorPitch';
 import { User } from './types';
 import { RefreshCw } from 'lucide-react';
@@ -35,9 +35,17 @@ function PageWrapper({ children }: { children: React.ReactNode }) {
       animate="animate"
       exit="exit"
       transition={pageTransition}
-      className="min-h-screen bg-slate-50"
+      className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative overflow-x-hidden selection:bg-indigo-500/20"
     >
-      {children}
+      {/* Ambient Fluid Background Mesh Orbs */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-40 -right-40 w-96 sm:w-[32rem] h-96 sm:h-[32rem] rounded-full bg-gradient-to-br from-indigo-500/15 via-sky-400/10 to-transparent blur-3xl animate-float-slow" />
+        <div className="absolute top-1/3 -left-40 w-80 sm:w-[28rem] h-80 sm:h-[28rem] rounded-full bg-gradient-to-tr from-amber-500/12 via-indigo-400/10 to-transparent blur-3xl animate-float-reverse" />
+        <div className="absolute -bottom-40 right-1/4 w-80 sm:w-[30rem] h-80 sm:h-[30rem] rounded-full bg-gradient-to-t from-emerald-500/10 via-cyan-400/8 to-transparent blur-3xl animate-float-slow" />
+      </div>
+      <div className="relative z-10 min-h-screen flex flex-col">
+        {children}
+      </div>
     </motion.div>
   );
 }
@@ -52,6 +60,13 @@ interface AppRoutesProps {
   onInitiateSession: (lawyerId: string, type: 'chat' | 'voice' | 'video') => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+}
+
+function AIAssistantRedirect() {
+  useEffect(() => {
+    openAIChat();
+  }, []);
+  return <Navigate to="/" replace />;
 }
 
 function AppRoutes({
@@ -69,155 +84,153 @@ function AppRoutes({
   const RoutesComponent = Routes as any;
 
   return (
-    <AnimatePresence mode="wait">
-      <RoutesComponent location={location} key={location.pathname}>
-        <Route 
-          path="/" 
-          element={
-            <PageWrapper>
-              <ClientExperience 
-                currentUser={currentUser} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
-          } 
-        />
-        <Route 
-          path="/advocates" 
-          element={
-            <PageWrapper>
-              <AdvocateExperience 
-                currentUser={currentUser} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
-          } 
-        />
-        <Route 
-          path="/login" 
-          element={
-            <PageWrapper>
-              <Login 
-                allUsers={allUsers} 
-                onLogin={onLogin} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
-          } 
-        />
-        <Route 
-          path="/register" 
-          element={
-            <PageWrapper>
-              <Register 
-                onRegisterSuccess={onRegisterSuccess} 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
-          } 
-        />
-        <Route 
-          path="/client" 
-          element={
-            currentUser ? (
+    <>
+      <AnimatePresence mode="wait">
+        <RoutesComponent location={location} key={location.pathname}>
+          <Route 
+            path="/" 
+            element={
               <PageWrapper>
-                <ClientDashboard 
-                  currentUser={currentUser} 
-                  onInitiateSession={onInitiateSession} 
-                  theme={theme}
-                  onToggleTheme={onToggleTheme}
-                />
-              </PageWrapper>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          } 
-        />
-        <Route 
-          path="/lawyer" 
-          element={
-            currentUser ? (
-              <PageWrapper>
-                <LawyerDashboard 
+                <ClientExperience 
                   currentUser={currentUser} 
                   theme={theme}
                   onToggleTheme={onToggleTheme}
                 />
               </PageWrapper>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          } 
-        />
-        <Route 
-          path="/hidden-admin-portal" 
-          element={
-            currentUser ? (
+            } 
+          />
+          <Route 
+            path="/advocates" 
+            element={
               <PageWrapper>
-                <AdminDashboard 
+                <AdvocateExperience 
                   currentUser={currentUser} 
                   theme={theme}
                   onToggleTheme={onToggleTheme}
                 />
               </PageWrapper>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          } 
-        />
-        <Route 
-          path="/dev-hub" 
-          element={
-            <PageWrapper>
-              <DeveloperHub />
-            </PageWrapper>
-          } 
-        />
-        <Route 
-          path="/session/:id" 
-          element={
-            currentUser ? (
+            } 
+          />
+          <Route 
+            path="/login" 
+            element={
               <PageWrapper>
-                <ActiveSession 
-                  currentUser={currentUser} 
+                <Login 
+                  allUsers={allUsers} 
+                  onLogin={onLogin} 
                   theme={theme}
                   onToggleTheme={onToggleTheme}
                 />
               </PageWrapper>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          } 
-        />
-        <Route 
-          path="/ai-assistant" 
-          element={
-            <PageWrapper>
-              <AIAssistant 
-                onBack={() => window.history.back()} 
-                onEscalate={() => window.location.href = '/client'} 
-              />
-            </PageWrapper>
-          } 
-        />
-        <Route 
-          path="/pitch" 
-          element={
-            <PageWrapper>
-              <InvestorPitch 
-                theme={theme}
-                onToggleTheme={onToggleTheme}
-              />
-            </PageWrapper>
-          } 
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </RoutesComponent>
-    </AnimatePresence>
+            } 
+          />
+          <Route 
+            path="/register" 
+            element={
+              <PageWrapper>
+                <Register 
+                  onRegisterSuccess={onRegisterSuccess} 
+                  theme={theme}
+                  onToggleTheme={onToggleTheme}
+                />
+              </PageWrapper>
+            } 
+          />
+          <Route 
+            path="/client" 
+            element={
+              currentUser ? (
+                <PageWrapper>
+                  <ClientDashboard 
+                    currentUser={currentUser} 
+                    onInitiateSession={onInitiateSession} 
+                    theme={theme}
+                    onToggleTheme={onToggleTheme}
+                  />
+                </PageWrapper>
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            } 
+          />
+          <Route 
+            path="/lawyer" 
+            element={
+              currentUser ? (
+                <PageWrapper>
+                  <LawyerDashboard 
+                    currentUser={currentUser} 
+                    theme={theme}
+                    onToggleTheme={onToggleTheme}
+                  />
+                </PageWrapper>
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            } 
+          />
+          <Route 
+            path="/hidden-admin-portal" 
+            element={
+              currentUser ? (
+                <PageWrapper>
+                  <AdminDashboard 
+                    currentUser={currentUser} 
+                    theme={theme}
+                    onToggleTheme={onToggleTheme}
+                  />
+                </PageWrapper>
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            } 
+          />
+          <Route 
+            path="/dev-hub" 
+            element={
+              <PageWrapper>
+                <DeveloperHub />
+              </PageWrapper>
+            } 
+          />
+          <Route 
+            path="/session/:id" 
+            element={
+              currentUser ? (
+                <PageWrapper>
+                  <ActiveSession 
+                    currentUser={currentUser} 
+                    theme={theme}
+                    onToggleTheme={onToggleTheme}
+                  />
+                </PageWrapper>
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            } 
+          />
+          <Route 
+            path="/ai-assistant" 
+            element={<AIAssistantRedirect />} 
+          />
+          <Route 
+            path="/pitch" 
+            element={
+              <PageWrapper>
+                <InvestorPitch 
+                  theme={theme}
+                  onToggleTheme={onToggleTheme}
+                />
+              </PageWrapper>
+            } 
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </RoutesComponent>
+      </AnimatePresence>
+
+      {/* Global Sticky In-Page AI Assistant Chat Box */}
+      <AIAssistant onEscalate={() => { window.location.href = '/client'; }} />
+    </>
   );
 }
 

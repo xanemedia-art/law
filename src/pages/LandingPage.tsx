@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Scale, Users, MessageSquare, ArrowRight, Search, Sparkles, Award, ShieldCheck } from 'lucide-react';
 import { User } from '../types';
+import { openAIChat } from '../components/AIAssistant';
 
 interface LandingPageProps {
   currentUser: User | null;
@@ -239,12 +240,13 @@ export default function LandingPage({ currentUser, allUsers, onSelectUser }: Lan
                 Query general rights context, Indian statutory guidelines, and procedural overviews before scheduling video sessions.
               </p>
             </div>
-            <Link 
-              to="/ai-assistant"
-              className="bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 text-xs font-bold uppercase tracking-wider py-4 px-5 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-md border border-amber-500/20"
+            <button 
+              type="button"
+              onClick={() => openAIChat()}
+              className="bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 text-xs font-bold uppercase tracking-wider py-4 px-5 rounded-xl transition-all text-center flex items-center justify-center gap-2 shadow-md border border-amber-500/20 cursor-pointer"
             >
               Ask AI Assistant <ArrowRight className="w-4 h-4 text-slate-950 group-hover:translate-x-1.5 transition-transform" />
-            </Link>
+            </button>
           </motion.div>
 
         </motion.div>
@@ -255,6 +257,12 @@ export default function LandingPage({ currentUser, allUsers, onSelectUser }: Lan
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4 text-xs font-mono">
           <div className="flex items-center gap-2 text-white font-display font-black text-sm tracking-widest">
             <Scale className="w-4 h-4 text-amber-550" /> LEGALTALK INDIA
+          </div>
+          <div className="flex items-center gap-1.5 font-sans text-slate-400">
+            <span>Built By</span>
+            <span className="font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2.5 py-0.5 rounded-full tracking-wide">
+              Xane Media
+            </span>
           </div>
           <span>&copy; {new Date().getFullYear()} LegalTalk India Private Limited. All Rights Reserved.</span>
           <div className="flex gap-4 font-sans font-bold">

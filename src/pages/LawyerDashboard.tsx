@@ -770,6 +770,13 @@ export default function LawyerDashboard({ currentUser, theme, onToggleTheme }: L
               <span>Log Out</span>
             </button>
           </div>
+
+          <div className="pt-2 flex items-center justify-center gap-1.5 text-[10px] font-sans text-slate-400 dark:text-slate-500">
+            <span>Built By</span>
+            <span className="font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">
+              Xane Media
+            </span>
+          </div>
         </div>
       </aside>
 
